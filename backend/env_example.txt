@@ -1,0 +1,14 @@
+# LLM API配置
+LLM_API_BASE=http://v2.open.venus.oa.com/llmproxy
+LLM_API_KEY=xxBZykeTGIVeqyGNaxNoMDro@2468
+LLM_MODEL=deepseek-r1-local-II
+LLM_MAX_TOKENS=10000
+LLM_TEMPERATURE=0.1
+LLM_TIMEOUT=60
+
+# Flask配置
+FLASK_ENV=development
+FLASK_DEBUG=True
+
+# 日志配置
+LOG_LEVEL=INFO 
