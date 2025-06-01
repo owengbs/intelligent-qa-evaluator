@@ -1,133 +1,168 @@
-import React, { useState } from 'react';
-import { Layout, Menu, Typography, Space, Button } from 'antd';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Layout, Menu, Typography, Space } from 'antd';
 import { 
   HomeOutlined, 
-  SettingOutlined, 
-  QuestionCircleOutlined,
-  GithubOutlined,
-  BulbOutlined,
-  ToolOutlined
+  BarChartOutlined, 
+  HistoryOutlined,
+  RobotOutlined,
+  SettingOutlined,
+  TagsOutlined
 } from '@ant-design/icons';
+import { Provider } from 'react-redux';
+import { store } from './store/store';
 import EvaluationForm from './components/EvaluationForm';
+import EvaluationHistory from './components/EvaluationHistory';
+import DimensionStatistics from './components/DimensionStatistics';
 import ClassificationConfig from './components/ClassificationConfig';
 import EvaluationStandardConfig from './components/EvaluationStandardConfig';
 import './App.css';
 
-const { Header, Content, Footer } = Layout;
-const { Text } = Typography;
+const { Header, Content, Sider } = Layout;
+const { Title } = Typography;
 
-function App() {
-  const [selectedMenu, setSelectedMenu] = useState('evaluation');
+// 分离出内部组件来使用useLocation
+function AppLayout() {
+  const location = useLocation();
+  const [selectedKey, setSelectedKey] = React.useState('1');
 
-  const menuItems = [
+  // 使用useMemo来优化menuItems，避免ESLint警告
+  const menuItems = React.useMemo(() => [
     {
-      key: 'evaluation',
+      key: '1',
       icon: <HomeOutlined />,
-      label: '质量评估',
+      label: '评估中心',
+      path: '/'
     },
     {
-      key: 'classification',
+      key: '2',
+      icon: <HistoryOutlined />,
+      label: '历史管理',
+      path: '/history'
+    },
+    {
+      key: '3',
+      icon: <BarChartOutlined />,
+      label: '维度统计',
+      path: '/statistics'
+    },
+    {
+      key: '4',
+      icon: <TagsOutlined />,
+      label: '分类管理',
+      path: '/classification'
+    },
+    {
+      key: '5',
       icon: <SettingOutlined />,
-      label: '分类配置',
-    },
-    {
-      key: 'evaluationStandard',
-      icon: <ToolOutlined />,
       label: '评估标准',
+      path: '/standards'
     }
-  ];
+  ], []);
 
-  const renderContent = () => {
-    switch (selectedMenu) {
-      case 'evaluation':
-        return <EvaluationForm />;
-      case 'classification':
-        return <ClassificationConfig />;
-      case 'evaluationStandard':
-        return <EvaluationStandardConfig />;
-      default:
-        return <EvaluationForm />;
+  // 根据当前路径设置选中的菜单项
+  useEffect(() => {
+    const currentItem = menuItems.find(item => item.path === location.pathname);
+    if (currentItem) {
+      setSelectedKey(currentItem.key);
     }
+  }, [location.pathname, menuItems]);
+
+  const handleMenuClick = ({ key }) => {
+    setSelectedKey(key);
   };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{ 
-        display: 'flex', 
-        alignItems: 'center',
-        background: 'linear-gradient(90deg, #1890ff 0%, #722ed1 100%)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+        padding: '0 24px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
       }}>
         <div style={{ 
-          color: 'white', 
-          fontSize: '20px', 
-          fontWeight: 'bold',
-          marginRight: '40px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px'
+          display: 'flex', 
+          alignItems: 'center', 
+          height: '100%' 
         }}>
-          <BulbOutlined />
-          问AI评估系统
+          <Space size={16}>
+            <RobotOutlined style={{ fontSize: '32px', color: 'white' }} />
+            <Title level={3} style={{ 
+              margin: 0, 
+              color: 'white',
+              fontWeight: 600
+            }}>
+              问AI评估系统
+            </Title>
+          </Space>
+          <div style={{ marginLeft: 'auto' }}>
+            <Space>
+              <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px' }}>
+                v2.1.0
+              </span>
+            </Space>
+          </div>
         </div>
-        <Menu
-          mode="horizontal"
-          selectedKeys={[selectedMenu]}
-          items={menuItems}
-          onClick={({ key }) => setSelectedMenu(key)}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            backgroundColor: 'transparent',
-            borderBottom: 'none'
-          }}
-          theme="dark"
-        />
-        <Space>
-          <Button 
-            type="text" 
-            icon={<GithubOutlined />} 
-            style={{ color: 'white' }}
-            href="https://github.com"
-            target="_blank"
-          >
-            GitHub
-          </Button>
-          <Button 
-            type="text" 
-            icon={<QuestionCircleOutlined />} 
-            style={{ color: 'white' }}
-          >
-            帮助
-          </Button>
-        </Space>
       </Header>
-
-      <Content style={{ 
-        padding: '24px 50px',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        minHeight: 'calc(100vh - 134px)'
-      }}>
-        {/* 主要内容区域 */}
-        {renderContent()}
-      </Content>
-
-      <Footer style={{ 
-        textAlign: 'center',
-        background: '#f0f2f5',
-        borderTop: '1px solid #d9d9d9'
-      }}>
-        <Space direction="vertical" size={4}>
-          <Text strong>问AI评估系统 v2.1.0</Text>
-          <Text type="secondary">
-            基于大语言模型的自动化评估 · 支持多维度评分 · 智能分类识别 · 时间因素考虑 · 评估标准配置
-          </Text>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            Powered by React + Flask + DeepSeek LLM © 2025
-          </Text>
-        </Space>
-      </Footer>
+      
+      <Layout>
+        <Sider 
+          width={200} 
+          style={{ 
+            background: '#fff',
+            boxShadow: '2px 0 8px rgba(0,0,0,0.1)'
+          }}
+        >
+          <Menu
+            mode="inline"
+            selectedKeys={[selectedKey]}
+            onClick={handleMenuClick}
+            style={{ 
+              height: '100%', 
+              borderRight: 0,
+              paddingTop: '16px'
+            }}
+            items={menuItems.map(item => ({
+              key: item.key,
+              icon: item.icon,
+              label: (
+                <Link 
+                  to={item.path}
+                  style={{ textDecoration: 'none' }}
+                >
+                  {item.label}
+                </Link>
+              )
+            }))}
+          />
+        </Sider>
+        
+        <Layout style={{ padding: 0 }}>
+          <Content style={{ 
+            margin: 0,
+            minHeight: 280,
+            background: '#f0f2f5'
+          }}>
+            <Routes>
+              <Route path="/" element={<EvaluationForm />} />
+              <Route path="/history" element={<EvaluationHistory />} />
+              <Route path="/statistics" element={<DimensionStatistics />} />
+              <Route path="/classification" element={<ClassificationConfig />} />
+              <Route path="/standards" element={<EvaluationStandardConfig />} />
+            </Routes>
+          </Content>
+        </Layout>
+      </Layout>
     </Layout>
+  );
+}
+
+function App() {
+  return (
+    <Provider store={store}>
+      <Router>
+        <AppLayout />
+      </Router>
+    </Provider>
   );
 }
 

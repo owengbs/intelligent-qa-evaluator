@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Table,
@@ -25,11 +25,8 @@ import {
   DeleteOutlined,
   ReloadOutlined,
   SettingOutlined,
-  EyeOutlined,
-  ImportOutlined,
   ExportOutlined,
-  CheckCircleOutlined,
-  InfoCircleOutlined
+  CheckCircleOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -53,7 +50,7 @@ const ClassificationConfig = () => {
   const [statistics, setStatistics] = useState({});
 
   // 加载分类标准
-  const loadClassificationStandards = async () => {
+  const loadClassificationStandards = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get('/api/classification-standards');
@@ -70,7 +67,7 @@ const ClassificationConfig = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // 计算统计信息
   const calculateStatistics = (standardsList) => {
@@ -94,7 +91,7 @@ const ClassificationConfig = () => {
 
   useEffect(() => {
     loadClassificationStandards();
-  }, []);
+  }, [loadClassificationStandards]);
 
   // 处理新增/编辑
   const handleEdit = (record = null) => {

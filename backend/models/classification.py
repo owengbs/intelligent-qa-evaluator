@@ -54,6 +54,80 @@ class ClassificationStandard(db.Model):
         return f'<ClassificationStandard {self.level1}->{self.level2}->{self.level3}>'
 
 
+class ClassificationResult(db.Model):
+    """分类结果数据模型"""
+    __tablename__ = 'classification_results'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_input = db.Column(db.Text, nullable=False, comment='用户输入')
+    level1 = db.Column(db.String(100), nullable=False, comment='一级分类')
+    level2 = db.Column(db.String(100), nullable=False, comment='二级分类') 
+    level3 = db.Column(db.String(100), nullable=False, comment='三级分类')
+    level1_definition = db.Column(db.Text, comment='一级分类定义')
+    level2_definition = db.Column(db.Text, comment='二级分类定义')
+    level3_definition = db.Column(db.Text, comment='三级分类定义')
+    confidence = db.Column(db.Float, default=0.0, comment='置信度')
+    reasoning = db.Column(db.Text, comment='分类理由')
+    classification_time_seconds = db.Column(db.Float, default=0.0, comment='分类耗时(秒)')
+    model_used = db.Column(db.String(100), comment='使用的模型')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
+    
+    def to_dict(self):
+        """转换为字典格式"""
+        return {
+            'id': self.id,
+            'user_input': self.user_input,
+            'level1': self.level1,
+            'level2': self.level2,
+            'level3': self.level3,
+            'level1_definition': self.level1_definition,
+            'level2_definition': self.level2_definition,
+            'level3_definition': self.level3_definition,
+            'confidence': self.confidence,
+            'reasoning': self.reasoning,
+            'classification_time_seconds': self.classification_time_seconds,
+            'model_used': self.model_used,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class ClassificationHistory(db.Model):
+    """分类历史数据模型"""
+    __tablename__ = 'classification_history'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_input = db.Column(db.Text, nullable=False, comment='用户输入')
+    classification_result = db.Column(db.Text, comment='分类结果(JSON格式)')
+    confidence = db.Column(db.Float, default=0.0, comment='置信度')
+    classification_time = db.Column(db.Float, comment='分类耗时(秒)')
+    model_used = db.Column(db.String(100), comment='使用的模型')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
+    
+    def to_dict(self):
+        """转换为字典格式"""
+        classification_data = {}
+        if self.classification_result:
+            try:
+                classification_data = json.loads(self.classification_result)
+            except (json.JSONDecodeError, TypeError):
+                classification_data = {}
+        
+        return {
+            'id': self.id,
+            'user_input': self.user_input,
+            'classification_result': classification_data,
+            'confidence': self.confidence,
+            'classification_time': self.classification_time,
+            'model_used': self.model_used,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+    
+    def __repr__(self):
+        return f'<ClassificationHistory {self.id}: {self.user_input[:50]}...>'
+
+
 class EvaluationStandard(db.Model):
     """评估标准数据模型"""
     __tablename__ = 'evaluation_standards'
@@ -98,29 +172,95 @@ class EvaluationStandard(db.Model):
         return f'<EvaluationStandard {self.level2_category}-{self.dimension}>'
 
 
-class ClassificationHistory(db.Model):
-    """分类历史记录"""
-    __tablename__ = 'classification_history'
+class EvaluationHistory(db.Model):
+    """评估历史数据模型"""
+    __tablename__ = 'evaluation_history'
     
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_input = db.Column(db.Text, nullable=False, comment='用户输入')
-    classification_result = db.Column(db.Text, nullable=False, comment='分类结果JSON')
-    confidence = db.Column(db.Float, comment='置信度')
-    classification_time = db.Column(db.Float, comment='分类耗时(秒)')
+    user_input = db.Column(db.Text, nullable=False, comment='用户问题')
+    model_answer = db.Column(db.Text, nullable=False, comment='模型回答')
+    reference_answer = db.Column(db.Text, comment='参考答案')
+    question_time = db.Column(db.DateTime, comment='问题提出时间')
+    evaluation_criteria = db.Column(db.Text, comment='评估标准')
+    total_score = db.Column(db.Float, nullable=False, comment='总分')
+    dimensions_json = db.Column(db.Text, comment='各维度分数(JSON格式)')
+    reasoning = db.Column(db.Text, comment='评分理由')
+    classification_level1 = db.Column(db.String(100), comment='一级分类')
+    classification_level2 = db.Column(db.String(100), comment='二级分类')
+    classification_level3 = db.Column(db.String(100), comment='三级分类')
+    evaluation_time_seconds = db.Column(db.Float, comment='评估耗时(秒)')
     model_used = db.Column(db.String(100), comment='使用的模型')
+    raw_response = db.Column(db.Text, comment='原始LLM响应')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
     
     def to_dict(self):
         """转换为字典格式"""
+        dimensions = {}
+        if self.dimensions_json:
+            try:
+                dimensions = json.loads(self.dimensions_json)
+            except (json.JSONDecodeError, TypeError):
+                dimensions = {}
+        
         return {
             'id': self.id,
             'user_input': self.user_input,
-            'classification_result': json.loads(self.classification_result) if self.classification_result else {},
-            'confidence': self.confidence,
-            'classification_time': self.classification_time,
+            'model_answer': self.model_answer,
+            'reference_answer': self.reference_answer,
+            'question_time': self.question_time.isoformat() if self.question_time else None,
+            'evaluation_criteria': self.evaluation_criteria,
+            'total_score': self.total_score,
+            'dimensions': dimensions,
+            'reasoning': self.reasoning,
+            'classification_level1': self.classification_level1,
+            'classification_level2': self.classification_level2,
+            'classification_level3': self.classification_level3,
+            'evaluation_time_seconds': self.evaluation_time_seconds,
             'model_used': self.model_used,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'raw_response': self.raw_response,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
     
+    @classmethod
+    def from_dict(cls, data):
+        """从字典创建实例"""
+        # 处理dimensions数据
+        dimensions_json = None
+        if 'dimensions' in data and data['dimensions']:
+            dimensions_json = json.dumps(data['dimensions'], ensure_ascii=False)
+        
+        # 处理question_time
+        question_time = None
+        if 'question_time' in data and data['question_time']:
+            if isinstance(data['question_time'], str):
+                try:
+                    question_time = datetime.fromisoformat(data['question_time'].replace('Z', '+00:00'))
+                except ValueError:
+                    try:
+                        question_time = datetime.strptime(data['question_time'], '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        question_time = None
+            elif isinstance(data['question_time'], datetime):
+                question_time = data['question_time']
+        
+        return cls(
+            user_input=data.get('user_input'),
+            model_answer=data.get('model_answer'),
+            reference_answer=data.get('reference_answer'),
+            question_time=question_time,
+            evaluation_criteria=data.get('evaluation_criteria'),
+            total_score=data.get('total_score', 0.0),
+            dimensions_json=dimensions_json,
+            reasoning=data.get('reasoning'),
+            classification_level1=data.get('classification_level1'),
+            classification_level2=data.get('classification_level2'),
+            classification_level3=data.get('classification_level3'),
+            evaluation_time_seconds=data.get('evaluation_time_seconds'),
+            model_used=data.get('model_used'),
+            raw_response=data.get('raw_response')
+        )
+    
     def __repr__(self):
-        return f'<ClassificationHistory {self.id}>' 
+        return f'<EvaluationHistory {self.id}: {self.total_score}/10>' 

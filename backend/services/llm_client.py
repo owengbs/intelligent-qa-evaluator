@@ -20,7 +20,7 @@ class LLMClient:
         # 预定义不同任务使用的模型
         self.models = {
             'classification': "deepseek-v3-local-II",  # 分类任务使用 v3
-            'evaluation': "deepseek-r1-local-II",     # 评估任务使用 r1
+            'evaluation': "deepseek-v3-local-II",     # 评估任务使用 r1
             'default': self.default_model
         }
         

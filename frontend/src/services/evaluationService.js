@@ -47,6 +47,28 @@ class EvaluationService {
       });
       
       console.log('收到评估响应:', response.data);
+      
+      // 评估成功后，自动保存到历史记录
+      if (response.data && response.data.score !== undefined) {
+        try {
+          await this.saveEvaluationHistory({
+            user_input: evaluationData.user_input,
+            model_answer: evaluationData.model_answer,
+            reference_answer: evaluationData.reference_answer,
+            question_time: evaluationData.question_time,
+            evaluation_criteria: evaluationData.evaluation_criteria,
+            total_score: response.data.score,
+            dimensions: response.data.dimensions || {},
+            reasoning: response.data.reasoning,
+            raw_response: response.data.raw_response
+          });
+          console.log('评估结果已保存到历史记录');
+        } catch (saveError) {
+          console.warn('保存评估历史失败，但评估结果正常返回:', saveError);
+          // 不影响主要的评估流程，只是记录警告
+        }
+      }
+      
       return response.data;
       
     } catch (error) {
@@ -65,6 +87,61 @@ class EvaluationService {
         // 其他错误
         throw new Error('请求配置错误');
       }
+    }
+  }
+
+  // 保存评估结果到历史记录
+  async saveEvaluationHistory(historyData) {
+    try {
+      const response = await this.api.post('/evaluation-history', historyData);
+      return response.data;
+    } catch (error) {
+      console.error('保存评估历史失败:', error);
+      throw new Error('保存评估历史失败');
+    }
+  }
+
+  // 获取评估历史记录
+  async getEvaluationHistory(params = {}) {
+    try {
+      const response = await this.api.get('/evaluation-history', { params });
+      return response.data;
+    } catch (error) {
+      console.error('获取评估历史失败:', error);
+      throw new Error('获取评估历史失败');
+    }
+  }
+
+  // 删除评估历史记录
+  async deleteEvaluationHistory(historyId) {
+    try {
+      const response = await this.api.delete(`/evaluation-history/${historyId}`);
+      return response.data;
+    } catch (error) {
+      console.error('删除评估历史失败:', error);
+      throw new Error('删除评估历史失败');
+    }
+  }
+
+  // 获取评估统计数据
+  async getEvaluationStatistics() {
+    try {
+      const response = await this.api.get('/evaluation-statistics');
+      return response.data;
+    } catch (error) {
+      console.error('获取评估统计失败:', error);
+      throw new Error('获取评估统计失败');
+    }
+  }
+
+  // 获取维度统计数据
+  async getDimensionStatistics() {
+    try {
+      const response = await this.api.get('/dimension-statistics');
+      return response.data;
+    } catch (error) {
+      console.error('获取维度统计失败:', error);
+      throw new Error('获取维度统计失败');
     }
   }
 

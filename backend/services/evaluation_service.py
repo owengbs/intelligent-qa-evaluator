@@ -187,22 +187,93 @@ class EvaluationService:
             }
     
     def _extract_dimension_scores(self, text):
-        """提取各维度评分（可选功能）"""
+        """动态提取各维度评分"""
         dimensions = {}
         
-        patterns = {
-            'accuracy': r'准确性[：:]?\s*(\d+(?:\.\d+)?)',
-            'completeness': r'完整性[：:]?\s*(\d+(?:\.\d+)?)', 
-            'fluency': r'流畅性[：:]?\s*(\d+(?:\.\d+)?)',
-            'safety': r'安全性[：:]?\s*(\d+(?:\.\d+)?)'
+        # 首先查找"各维度评分:"部分
+        dimension_section_pattern = r'各维度评分[：:]?\s*\n(.+?)(?=\n评分理由|$)'
+        dimension_section_match = re.search(dimension_section_pattern, text, re.DOTALL)
+        
+        if dimension_section_match:
+            dimension_section = dimension_section_match.group(1)
+            self.logger.info("找到各维度评分部分，开始解析")
+            
+            # 解析每一行的维度分数，支持多种格式
+            lines = dimension_section.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 尝试多种模式来匹配维度分数
+                patterns = [
+                    r'(.+?)[：:]\s*(\d+(?:\.\d+)?)\s*/?\s*(\d+)?',  # 准确性: 4/4 或 准确性: 4
+                    r'(.+?)\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)',        # 准确性 4/4
+                    r'(.+?)[：:]\s*\[.*?(\d+(?:\.\d+)?).*?\]',      # 准确性: [详细说明 4分]
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, line)
+                    if match:
+                        dimension_name = match.group(1).strip()
+                        score = float(match.group(2))
+                        
+                        # 标准化维度名称映射
+                        dimension_key = self._normalize_dimension_name(dimension_name)
+                        dimensions[dimension_key] = score
+                        
+                        self.logger.debug(f"提取维度分数: {dimension_name} -> {dimension_key} = {score}")
+                        break
+        else:
+            # 回退到原有的固定模式匹配（向后兼容）
+            self.logger.info("未找到标准的各维度评分格式，尝试传统模式匹配")
+            traditional_patterns = {
+                'accuracy': r'准确性[：:]?\s*(\d+(?:\.\d+)?)',
+                'completeness': r'完整性[：:]?\s*(\d+(?:\.\d+)?)', 
+                'fluency': r'流畅性[：:]?\s*(\d+(?:\.\d+)?)',
+                'safety': r'安全性[：:]?\s*(\d+(?:\.\d+)?)',
+                'relevance': r'相关性[：:]?\s*(\d+(?:\.\d+)?)',
+                'clarity': r'清晰度[：:]?\s*(\d+(?:\.\d+)?)',
+                'timeliness': r'时效性[：:]?\s*(\d+(?:\.\d+)?)',
+                'usability': r'可用性[：:]?\s*(\d+(?:\.\d+)?)',
+                'compliance': r'合规性[：:]?\s*(\d+(?:\.\d+)?)'
+            }
+            
+            for dimension_key, pattern in traditional_patterns.items():
+                match = re.search(pattern, text)
+                if match:
+                    dimensions[dimension_key] = float(match.group(1))
+                    self.logger.debug(f"传统模式匹配维度: {dimension_key} = {match.group(1)}")
+        
+        self.logger.info(f"成功提取 {len(dimensions)} 个维度分数: {list(dimensions.keys())}")
+        return dimensions
+    
+    def _normalize_dimension_name(self, dimension_name):
+        """标准化维度名称为英文key"""
+        # 中文到英文的映射表，支持更多维度
+        name_mapping = {
+            '准确性': 'accuracy',
+            '完整性': 'completeness',
+            '流畅性': 'fluency',
+            '安全性': 'safety',
+            '相关性': 'relevance',
+            '清晰度': 'clarity',
+            '时效性': 'timeliness',
+            '可用性': 'usability',
+            '合规性': 'compliance'
         }
         
-        for dimension, pattern in patterns.items():
-            match = re.search(pattern, text)
-            if match:
-                dimensions[dimension] = float(match.group(1))
+        # 移除可能的特殊字符和空格
+        clean_name = dimension_name.strip('[](){}').strip()
         
-        return dimensions 
+        # 查找映射
+        if clean_name in name_mapping:
+            return name_mapping[clean_name]
+        
+        # 如果没有找到映射，返回处理后的英文key（去除特殊字符，转小写）
+        import re
+        english_key = re.sub(r'[^a-zA-Z0-9_]', '', clean_name.lower())
+        return english_key if english_key else 'unknown_dimension'
 
     def evaluate_qa(self, user_input, model_answer, evaluation_criteria, question_time=None, prompt_template=None):
         """
@@ -265,19 +336,32 @@ class EvaluationService:
     
     def _get_default_qa_prompt(self):
         """获取默认的QA评估prompt模板"""
-        return """请根据以下评估标准对模型回答进行评分：
+        return """请根据以下评估标准对模型回答进行严格评分：
 
 评估标准：
 {evaluation_criteria}
+
+严格评分要求：
+1. 严格按照上述评估标准进行评分，不得放宽标准
+2. 信息准确性要求极高，任何错误都应严重扣分
+3. 回答相关性必须很高，偏离主题应扣分
+4. 表达清晰度要求高，模糊表述应扣分
+5. 评分应趋向保守，只有真正优秀的回答才能获得高分
 
 评估信息：
 问题时间: {question_time}
 用户输入: {user_input}
 模型回答: {model_answer}
 
+评分指导原则：
+- 8-10分：仅给予信息完全准确、高度相关、表达清晰的优秀回答
+- 5-7分：基本合格但存在明显不足的回答
+- 2-4分：存在错误或质量较低的回答
+- 0-1分：严重错误或完全不合格的回答
+
 请严格按照以下格式返回评估结果:
 总分: [分数]/10
-评分理由: [详细的评分分析，按照评估标准逐项说明]"""
+评分理由: [详细的评分分析，必须说明扣分理由，按照评估标准逐项说明问题]"""
     
     def _replace_variables(self, template, variables):
         """替换模板中的变量"""

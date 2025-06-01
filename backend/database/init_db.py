@@ -3,6 +3,9 @@
 """
 import os
 import sys
+import sqlite3
+import json
+from datetime import datetime
 
 # 添加父目录到Python路径，确保可以导入模块
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12,7 +15,7 @@ sys.path.insert(0, parent_dir)
 try:
     from flask import Flask
     from config import Config
-    from models.classification import db, ClassificationStandard, EvaluationStandard
+    from models.classification import db, ClassificationStandard, EvaluationStandard, EvaluationHistory
     from utils.logger import get_logger
 except ImportError as e:
     print(f"导入模块失败: {e}")
@@ -33,23 +36,18 @@ def create_tables():
         return False
 
 def init_database():
-    """初始化数据库"""
-    logger.info("开始初始化数据库...")
-    
+    """初始化数据库和表"""
     try:
-        # 检查是否已有数据
-        existing_standards = ClassificationStandard.query.count()
-        if existing_standards > 0:
-            logger.info(f"数据库中已存在 {existing_standards} 条分类标准，跳过初始化")
-            
-            # 检查并初始化评估标准
-            init_evaluation_standards()
-            return True
+        logger.info("开始初始化数据库...")
         
-        # 初始化分类标准数据
+        # 创建所有表
+        db.create_all()
+        logger.info("数据库表创建完成")
+        
+        # 初始化分类标准
         init_classification_standards()
         
-        # 初始化评估标准数据  
+        # 初始化评估标准
         init_evaluation_standards()
         
         logger.info("数据库初始化完成")
@@ -57,215 +55,107 @@ def init_database():
         
     except Exception as e:
         logger.error(f"数据库初始化失败: {str(e)}")
-        db.session.rollback()
         return False
 
 def init_classification_standards():
     """初始化分类标准数据"""
-    logger.info("开始初始化分类标准...")
-    
-    # 默认分类标准数据
-    default_standards = [
-        {
-            "level1": "选股",
-            "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求",
-            "level2": "选股",
-            "level3": "策略选股",
-            "level3_definition": "策略条件出发，希望得到满足至少一个条件的股票池",
-            "examples": "昨天涨停的票，今天下跌的票，今天主力资金净流入的票，以上条件必须都符合的票是哪支股票",
-            "is_default": True
-        },
-        {
-            "level1": "选股",
-            "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求", 
-            "level2": "选股",
-            "level3": "概念板块选股",
-            "level3_definition": "主要是问询某个板块/概念下的股票池",
-            "examples": "ai智能电力包括哪些股票",
-            "is_default": True
-        },
-        {
-            "level1": "选股",
-            "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求",
-            "level2": "选股",
-            "level3": "模糊推荐",
-            "level3_definition": "提问很模糊，想知道近期的热门/优秀的公司，未指明范围",
-            "examples": "推荐几只股票",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "宏观经济分析",
-            "level3": "宏观经济分析",
-            "level3_definition": "主要是跟宏观经济数据相关的问题",
-            "examples": "美国的CPI会超预期吗？",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "大盘行业分析",
-            "level3": "大盘行业分析",
-            "level3_definition": "大盘或具体某个/某些指数、板块、行业相关的内容",
-            "examples": "今天大盘怎么样？现在是牛市吗？",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "个股分析",
-            "level3": "综合分析",
-            "level3_definition": "包括纯标的等，及分析多个标的（未指明某一维度）之间的对比",
-            "examples": "纯标的输入：000001 或者 中国平安；璞泰来与宝明科技比较",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "个股分析",
-            "level3": "基本面分析",
-            "level3_definition": "主要是分析公司的基本面信息",
-            "examples": "比亚迪的业绩怎么样？宁德时代财务怎么样？",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "个股分析",
-            "level3": "技术面分析",
-            "level3_definition": "主要是分析股票的技术指标",
-            "examples": "中国平安的技术指标怎么样？",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "个股分析",
-            "level3": "资金面分析",
-            "level3_definition": "主要分析主力资金流入流出",
-            "examples": "贵州茅台今天的资金面怎么样？",
-            "is_default": True
-        },
-        {
-            "level1": "分析",
-            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
-            "level2": "个股分析",
-            "level3": "异动归因",
-            "level3_definition": "问股票当天为何大涨、大跌或异动",
-            "examples": "中国平安今天为何大涨？",
-            "is_default": True
-        },
-        {
-            "level1": "决策",
-            "level1_definition": "解决用户有明确投资标的时，何时买卖该标的的问题",
-            "level2": "个股决策",
-            "level3": "买卖决策",
-            "level3_definition": "问什么时候买入、卖出股票",
-            "examples": "中国平安什么时候可以买入？",
-            "is_default": True
-        },
-        {
-            "level1": "决策",
-            "level1_definition": "解决用户有明确投资标的时，何时买卖该标的的问题",
-            "level2": "个股决策",
-            "level3": "持仓决策",
-            "level3_definition": "问已有持仓的股票是否继续持有",
-            "examples": "中国平安我现在持有，还能继续持有吗？",
-            "is_default": True
-        },
-        {
-            "level1": "决策",
-            "level1_definition": "解决用户有明确投资标的时，何时买卖该标的的问题",
-            "level2": "个股决策",
-            "level3": "对比决策",
-            "level3_definition": "两个或多个股票进行对比，问哪个更值得投资",
-            "examples": "中国平安和中国人寿哪个更好？",
-            "is_default": True
-        },
-        {
-            "level1": "决策",
-            "level1_definition": "解决用户有明确投资标的时，何时买卖该标的的问题",
-            "level2": "个股决策",
-            "level3": "价位预测",
-            "level3_definition": "问股票未来价格走势或目标价",
-            "examples": "中国平安能涨到多少？",
-            "is_default": True
-        },
-        {
-            "level1": "信息查询",
-            "level1_definition": "解决用户对股票市场信息的查询需求",
-            "level2": "信息查询",
-            "level3": "基础信息查询",
-            "level3_definition": "股票代码、公司信息、财务数据等基础信息查询",
-            "examples": "中国平安的股票代码是什么？",
-            "is_default": True
-        },
-        {
-            "level1": "信息查询",
-            "level1_definition": "解决用户对股票市场信息的查询需求",
-            "level2": "信息查询",
-            "level3": "实时数据查询",
-            "level3_definition": "当前股价、涨跌幅等实时数据查询",
-            "examples": "中国平安现在多少钱？",
-            "is_default": True
-        },
-        {
-            "level1": "信息查询",
-            "level1_definition": "解决用户对股票市场信息的查询需求",
-            "level2": "信息查询",
-            "level3": "历史数据查询",
-            "level3_definition": "历史价格、成交量等历史数据查询",
-            "examples": "中国平安去年同期的价格是多少？",
-            "is_default": True
-        },
-        {
-            "level1": "信息查询",
-            "level1_definition": "解决用户对股票市场信息的查询需求",
-            "level2": "信息查询",
-            "level3": "通用查询",
-            "level3_definition": "一些比较泛化和轻量级的问题",
-            "examples": "炒股需要什么条件？",
-            "is_default": True
-        },
-        {
-            "level1": "无效",
-            "level1_definition": "无关投资或无法回答的问题",
-            "level2": "无效问题",
-            "level3": "无效问题",
-            "level3_definition": "与投资无关或无法理解的问题",
-            "examples": "你好；今天天气怎么样？",
-            "is_default": True
-        }
-    ]
-    
     try:
-        # 批量创建分类标准
-        for standard_data in default_standards:
-            standard = ClassificationStandard.from_dict(standard_data)
+        # 检查是否已有分类标准数据
+        existing_count = ClassificationStandard.query.count()
+        if existing_count > 0:
+            logger.info(f"数据库中已存在 {existing_count} 条分类标准，跳过初始化")
+            return
+        
+        # 分类标准数据
+        classification_data = [
+            # 一级分类：选股
+            {
+                "level1": "选股",
+                "level2": "选股",
+                "level3": "概念板块选股",
+                "level1_definition": "根据特定条件筛选推荐股票的问题",
+                "level2_definition": "选股相关问题",
+                "level3_definition": "基于概念、主题、板块进行选股推荐"
+            },
+            
+            # 一级分类：分析
+            {
+                "level1": "分析",
+                "level2": "宏观经济分析",
+                "level3": "政策解读",
+                "level1_definition": "对市场、经济、政策等进行深度分析的问题",
+                "level2_definition": "宏观经济层面的分析",
+                "level3_definition": "对经济政策、货币政策等的解读分析"
+            },
+            {
+                "level1": "分析",
+                "level2": "大盘行业分析",
+                "level3": "行业比较",
+                "level1_definition": "对市场、经济、政策等进行深度分析的问题",
+                "level2_definition": "大盘和行业层面的分析",
+                "level3_definition": "不同行业间的对比分析"
+            },
+            {
+                "level1": "分析",
+                "level2": "个股分析",
+                "level3": "基本面分析",
+                "level1_definition": "对市场、经济、政策等进行深度分析的问题",
+                "level2_definition": "针对个股的深度分析",
+                "level3_definition": "基于财务数据、业务模式等的基本面分析"
+            },
+            
+            # 一级分类：决策
+            {
+                "level1": "决策",
+                "level2": "个股决策",
+                "level3": "买卖时机",
+                "level1_definition": "涉及投资决策、操作建议的问题",
+                "level2_definition": "针对个股的投资决策",
+                "level3_definition": "关于个股买入、卖出时机的决策建议"
+            },
+            
+            # 一级分类：信息查询
+            {
+                "level1": "信息查询",
+                "level2": "信息查询",
+                "level3": "股票信息查询",
+                "level1_definition": "查询具体信息、数据、定义等的问题",
+                "level2_definition": "各类信息查询",
+                "level3_definition": "查询股票的基本信息、财务数据等"
+            }
+        ]
+        
+        # 插入分类标准数据
+        for data in classification_data:
+            standard = ClassificationStandard(
+                level1=data['level1'],
+                level2=data['level2'],
+                level3=data['level3'],
+                level1_definition=data['level1_definition'],
+                level2_definition=data['level2_definition'],
+                level3_definition=data['level3_definition'],
+                is_default=True
+            )
             db.session.add(standard)
         
         db.session.commit()
-        logger.info(f"成功插入 {len(default_standards)} 条默认分类标准")
-        return True
+        logger.info(f"成功初始化 {len(classification_data)} 条分类标准")
+        
     except Exception as e:
+        logger.error(f"初始化分类标准失败: {str(e)}")
         db.session.rollback()
-        logger.error(f"插入默认数据失败: {e}")
-        return False
 
 def init_evaluation_standards():
     """初始化评估标准数据"""
-    logger.info("开始初始化评估标准...")
-    
     try:
         # 检查是否已有评估标准数据
-        existing_eval_standards = EvaluationStandard.query.count()
-        if existing_eval_standards > 0:
-            logger.info(f"数据库中已存在 {existing_eval_standards} 条评估标准，跳过初始化")
-            return True
+        existing_count = EvaluationStandard.query.count()
+        if existing_count > 0:
+            logger.info(f"数据库中已存在 {existing_count} 条评估标准，跳过初始化")
+            return
         
-        # 默认评估标准数据
-        default_evaluation_standards = [
+        # 评估标准数据
+        evaluation_data = [
             # 选股评估标准
             {
                 "level2_category": "选股",
@@ -495,28 +385,44 @@ def init_evaluation_standards():
                 "max_score": 2,
                 "is_default": True
             },
-            {
-                "level2_category": "无效问题",
-                "dimension": "合规性",
-                "reference_standard": "避免政治/暴力等违规回应",
-                "scoring_principle": "0-3分：完全合规=3分；1处违规=0分（一票否决）",
-                "max_score": 3,
-                "is_default": True
-            }
         ]
         
-        # 批量创建评估标准
-        for eval_data in default_evaluation_standards:
-            eval_standard = EvaluationStandard.from_dict(eval_data)
-            db.session.add(eval_standard)
+        # 插入评估标准数据
+        for data in evaluation_data:
+            standard = EvaluationStandard(
+                level2_category=data['level2_category'],
+                dimension=data['dimension'],
+                reference_standard=data['reference_standard'],
+                scoring_principle=data['scoring_principle'],
+                max_score=data['max_score'],
+                is_default=data['is_default']
+            )
+            db.session.add(standard)
         
         db.session.commit()
-        logger.info(f"评估标准初始化完成，共创建 {len(default_evaluation_standards)} 条记录")
-        return True
+        logger.info(f"成功初始化 {len(evaluation_data)} 条评估标准")
         
     except Exception as e:
         logger.error(f"初始化评估标准失败: {str(e)}")
         db.session.rollback()
+
+def clear_database():
+    """清空数据库（谨慎使用）"""
+    try:
+        logger.warning("开始清空数据库...")
+        
+        # 删除所有表
+        db.drop_all()
+        logger.info("数据库表已清空")
+        
+        # 重新创建表
+        db.create_all()
+        logger.info("数据库表已重新创建")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"清空数据库失败: {str(e)}")
         return False
 
 def main():

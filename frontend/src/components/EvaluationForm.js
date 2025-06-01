@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
   Button, 
@@ -61,11 +61,44 @@ const EvaluationForm = () => {
   // Redux状态
   const { isLoading, result, error, history } = useSelector((state) => state.evaluation);
 
-  // 使用useMemo优化默认评分规则模板
-  const defaultScoringPrompt = useMemo(() => `请根据以下详细的评估标准对回答质量进行评分：
+  // 动态生成评分prompt - 根据评估标准自动生成维度评分要求
+  const generateScoringPrompt = (evaluationCriteria) => {
+    // 解析评估标准，提取维度信息
+    const lines = evaluationCriteria.split('\n').filter(line => line.trim());
+    const dimensions = [];
+    
+    lines.forEach(line => {
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        const dimensionName = parts[0].trim();
+        const description = parts[1].trim();
+        const scoringRule = parts[2].trim();
+        
+        dimensions.push({
+          name: dimensionName,
+          description: description,
+          scoringRule: scoringRule
+        });
+      }
+    });
+
+    // 生成维度评分要求
+    const dimensionRequirements = dimensions.map(dim => 
+      `${dim.name}: [${dim.scoringRule}]`
+    ).join('\n');
+
+    return `请根据以下详细的评估标准对回答质量进行严格评分：
 
 评估标准：
 {evaluation_criteria}
+
+严格评分要求：
+1. 严格按照上述评估标准进行评分，不得放宽标准
+2. 特别注意问题提出时间 {question_time}，时效性判断要求严格
+3. 任何信息错误都应严重扣分，时间敏感内容要求更高
+4. 回答质量评判从严，避免给出过高分数
+5. 只有真正优秀的回答才能获得高分
+6. 必须为每个评估维度提供具体分数，不得模糊评分
 
 评估信息：
 问题提出时间: {question_time}
@@ -73,15 +106,27 @@ const EvaluationForm = () => {
 模型回答: {model_answer}  
 参考答案: {reference_answer}
 
+评分指导原则：
+- 8-10分：仅给予信息准确、分析深入、表达清晰的优秀回答
+- 5-7分：基本合格但存在明显不足的回答
+- 2-4分：存在错误或质量较低的回答
+- 0-1分：严重错误或完全不合格的回答
+
 评估要求：
 1. 严格按照上述评估标准进行评分
 2. 特别注意问题提出时间 {question_time}，判断答案在当时是否准确
 3. 某些信息可能随时间变化，需要基于当时的情况进行评判
 4. 对于时间敏感的内容（如历史事件、政策法规、技术发展等）要格外注意
+5. 必须为每个评估维度提供具体分数
 
 请严格按照以下格式返回评估结果:
 总分: [分数]/10
-评分理由: [详细的多行评分分析，按照评估标准逐项说明，特别注明时间因素的考虑]`, []);
+
+各维度评分:
+${dimensionRequirements}
+
+评分理由: [详细的多行评分分析，必须说明扣分理由，按照评估标准逐项说明每个维度的评分理由和存在的问题，特别注明时间因素的考虑]`;
+  };
 
   // 加载动画效果
   useEffect(() => {
@@ -122,6 +167,9 @@ const EvaluationForm = () => {
     try {
       const values = await form.validateFields();
       
+      // 动态生成适配当前评估标准的scoring_prompt
+      const dynamicScoringPrompt = generateScoringPrompt(values.evaluationCriteria);
+      
       // 映射前端字段名到后端API期望的字段名
       const formattedValues = {
         user_input: values.userQuery,  // userQuery -> user_input
@@ -129,10 +177,11 @@ const EvaluationForm = () => {
         reference_answer: values.referenceAnswer || '',  // referenceAnswer -> reference_answer
         question_time: values.questionTime ? values.questionTime.format('YYYY-MM-DD HH:mm:ss') : dayjs().format('YYYY-MM-DD HH:mm:ss'),
         evaluation_criteria: values.evaluationCriteria,  // evaluationCriteria -> evaluation_criteria
-        scoring_prompt: defaultScoringPrompt  // 使用默认的scoring_prompt
+        scoring_prompt: dynamicScoringPrompt  // 使用动态生成的scoring_prompt
       };
       
       console.log('表单验证通过，提交评估:', formattedValues);
+      console.log('动态生成的评估prompt:', dynamicScoringPrompt);
       dispatch(submitEvaluation(formattedValues));
     } catch (validationError) {
       console.error('表单验证失败:', validationError);
@@ -316,27 +365,158 @@ const EvaluationForm = () => {
           
           {result.dimensions && Object.keys(result.dimensions).length > 0 && (
             <Col span={24}>
-              <Title level={5}>各维度评分:</Title>
-              <Row gutter={16}>
+              <Title level={5} style={{ marginBottom: 16, color: '#1890ff' }}>
+                📊 各维度评分详情
+              </Title>
+              <Row gutter={[16, 16]}>
                 {Object.entries(result.dimensions).map(([key, value]) => {
+                  // 扩展的维度名称映射，支持更多维度
                   const dimensionNames = {
                     accuracy: '准确性',
                     completeness: '完整性',
                     fluency: '流畅性',
-                    safety: '安全性'
+                    safety: '安全性',
+                    relevance: '相关性',
+                    clarity: '清晰度',
+                    timeliness: '时效性',
+                    usability: '可用性',
+                    compliance: '合规性'
                   };
+                  
+                  // 扩展的维度图标映射
+                  const dimensionIcons = {
+                    accuracy: '🎯',
+                    completeness: '📋',
+                    fluency: '💬',
+                    safety: '🛡️',
+                    relevance: '🔗',
+                    clarity: '💡',
+                    timeliness: '⏰',
+                    usability: '⚡',
+                    compliance: '✅'
+                  };
+                  
+                  // 从表单获取评估标准文本，动态解析最大分数
+                  const criteriaText = form.getFieldValue('evaluationCriteria') || '';
+                  const maxScore = getDimensionMaxScore(key, criteriaText);
+                  const percentage = Math.round((value / maxScore) * 100);
+                  
+                  // 显示名称：优先使用映射，否则使用原始key（首字母大写）
+                  const displayName = dimensionNames[key] || key.charAt(0).toUpperCase() + key.slice(1);
+                  const icon = dimensionIcons[key] || '📈';
+                  
                   return (
-                    <Col span={6} key={key}>
-                      <Statistic
-                        title={dimensionNames[key] || key}
-                        value={value}
-                        precision={1}
-                        valueStyle={{ fontSize: '16px' }}
-                      />
+                    <Col xs={24} sm={12} lg={6} key={key}>
+                      <Card
+                        size="small"
+                        style={{
+                          background: 'linear-gradient(135deg, #f6f9fc 0%, #ffffff 100%)',
+                          border: '1px solid #e8f4fd',
+                          borderRadius: '12px',
+                          height: '120px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center'
+                        }}
+                        bodyStyle={{ padding: '16px' }}
+                      >
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ 
+                            fontSize: '24px', 
+                            marginBottom: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px'
+                          }}>
+                            <span>{icon}</span>
+                            <Text strong style={{ fontSize: '16px', color: '#1890ff' }}>
+                              {displayName}
+                            </Text>
+                          </div>
+                          
+                          <div style={{ marginBottom: '8px' }}>
+                            <Text style={{ 
+                              fontSize: '20px', 
+                              fontWeight: 'bold',
+                              color: getScoreColor((value / maxScore) * 10)
+                            }}>
+                              {value}
+                            </Text>
+                            <Text type="secondary" style={{ fontSize: '14px' }}>
+                              /{maxScore}
+                            </Text>
+                          </div>
+                          
+                          <Progress
+                            percent={percentage}
+                            size="small"
+                            strokeColor={{
+                              '0%': percentage >= 80 ? '#52c41a' : percentage >= 60 ? '#1890ff' : percentage >= 40 ? '#faad14' : '#ff4d4f',
+                              '100%': percentage >= 80 ? '#73d13d' : percentage >= 60 ? '#40a9ff' : percentage >= 40 ? '#ffc53d' : '#ff7875',
+                            }}
+                            showInfo={false}
+                            strokeWidth={6}
+                            style={{ marginBottom: '4px' }}
+                          />
+                          
+                          <Text type="secondary" style={{ fontSize: '12px' }}>
+                            {percentage}%
+                          </Text>
+                        </div>
+                      </Card>
                     </Col>
                   );
                 })}
               </Row>
+              
+              {/* 添加维度评分总览 */}
+              <div style={{ 
+                marginTop: 16, 
+                padding: '12px 16px',
+                background: 'linear-gradient(135deg, #e6f7ff 0%, #f0f9ff 100%)',
+                borderRadius: '8px',
+                border: '1px solid #91d5ff'
+              }}>
+                <Row align="middle" gutter={16}>
+                  <Col>
+                    <Text strong style={{ color: '#1890ff' }}>
+                      📈 综合表现:
+                    </Text>
+                  </Col>
+                  <Col flex="auto">
+                    {Object.entries(result.dimensions).map(([key, value], index) => {
+                      // 使用相同的维度名称映射
+                      const dimensionNames = {
+                        accuracy: '准确性',
+                        completeness: '完整性',
+                        fluency: '流畅性',
+                        safety: '安全性',
+                        relevance: '相关性',
+                        clarity: '清晰度',
+                        timeliness: '时效性',
+                        usability: '可用性',
+                        compliance: '合规性'
+                      };
+                      
+                      const criteriaText = form.getFieldValue('evaluationCriteria') || '';
+                      const maxScore = getDimensionMaxScore(key, criteriaText);
+                      const percentage = (value / maxScore) * 100;
+                      const displayName = dimensionNames[key] || key.charAt(0).toUpperCase() + key.slice(1);
+                      
+                      return (
+                        <Tag
+                          key={key}
+                          color={percentage >= 80 ? 'success' : percentage >= 60 ? 'processing' : percentage >= 40 ? 'warning' : 'error'}
+                          style={{ margin: '2px 4px 2px 0', fontSize: '12px' }}
+                        >
+                          {displayName}: {value}/{maxScore}
+                        </Tag>
+                      );
+                    })}
+                  </Col>
+                </Row>
+              </div>
             </Col>
           )}
           
@@ -547,7 +727,10 @@ const EvaluationForm = () => {
         handleAutoClassify(value);
       }, 1000);
     }
-  }, [autoClassifyEnabled]); // 移除handleAutoClassify依赖，直接调用
+  // 注意：这里故意不包含handleAutoClassify依赖，因为它会导致循环依赖
+  // handleAutoClassify在每次render时都会重新创建，会导致debounce失效
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoClassifyEnabled]);
 
   // 清理定时器
   useEffect(() => {
@@ -666,6 +849,92 @@ const EvaluationForm = () => {
         </Paragraph>
       </Card>
     );
+  };
+
+  // 解析评估标准获取各维度最大分数
+  const parseEvaluationCriteria = (criteriaText) => {
+    const lines = criteriaText.split('\n').filter(line => line.trim());
+    const criteriaMap = {};
+    
+    lines.forEach(line => {
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        const dimensionName = parts[0].trim();
+        const scoringRule = parts[2].trim();
+        
+        // 提取最大分数，查找类似 "0-4分" 的模式
+        const scoreMatch = scoringRule.match(/(\d+)-(\d+)分|(\d+)分/);
+        if (scoreMatch) {
+          const maxScore = parseInt(scoreMatch[2] || scoreMatch[3] || scoreMatch[1]);
+          criteriaMap[dimensionName] = maxScore;
+        }
+      }
+    });
+    
+    return criteriaMap;
+  };
+
+  // 获取维度对应的最大分数
+  const getDimensionMaxScore = (dimensionKey, criteriaText) => {
+    const criteriaMap = parseEvaluationCriteria(criteriaText || '');
+    
+    // 扩展的默认映射，支持更多维度
+    const defaultMapping = {
+      accuracy: '准确性',
+      completeness: '完整性', 
+      fluency: '流畅性',
+      safety: '安全性',
+      relevance: '相关性',
+      clarity: '清晰度',
+      timeliness: '时效性',
+      usability: '可用性',
+      compliance: '合规性'
+    };
+    
+    const chineseName = defaultMapping[dimensionKey];
+    
+    // 先尝试用中文名称查找
+    if (chineseName && criteriaMap[chineseName]) {
+      return criteriaMap[chineseName];
+    }
+    
+    // 再尝试用英文名称查找（首字母大写）
+    const capitalizedKey = dimensionKey.charAt(0).toUpperCase() + dimensionKey.slice(1);
+    if (criteriaMap[capitalizedKey]) {
+      return criteriaMap[capitalizedKey];
+    }
+    
+    // 尝试用英文名称查找（原始格式）
+    if (criteriaMap[dimensionKey]) {
+      return criteriaMap[dimensionKey];
+    }
+    
+    // 尝试遍历所有标准，找到可能匹配的维度
+    for (const [stdName, maxScore] of Object.entries(criteriaMap)) {
+      // 模糊匹配：检查是否包含类似的关键词
+      const lowerStdName = stdName.toLowerCase();
+      const lowerDimensionKey = dimensionKey.toLowerCase();
+      
+      if (lowerStdName.includes(lowerDimensionKey) || lowerDimensionKey.includes(lowerStdName)) {
+        return maxScore;
+      }
+    }
+    
+    // 扩展的默认值，支持更多维度类型
+    const defaultScores = {
+      accuracy: 4,
+      completeness: 3,
+      fluency: 2,
+      safety: 1,
+      relevance: 3,
+      clarity: 2,
+      timeliness: 3,
+      usability: 3,
+      compliance: 2
+    };
+    
+    // 如果还是找不到，使用默认值或者10分
+    return defaultScores[dimensionKey] || 5; // 改为5分作为未知维度的默认值
   };
 
   return (

@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime
 import logging
+import traceback
 
 # 导入配置
 from config import config
@@ -14,6 +15,7 @@ from models.classification import db
 from services.evaluation_service import EvaluationService
 from services.classification_service_sqlite import ClassificationService
 from services.evaluation_standard_service import EvaluationStandardService
+from services.evaluation_history_service import EvaluationHistoryService
 from utils.logger import get_logger
 
 # 获取环境变量
@@ -38,6 +40,7 @@ db.init_app(app)
 evaluation_service = EvaluationService()
 classification_service = ClassificationService(app)
 evaluation_standard_service = EvaluationStandardService(app)
+evaluation_history_service = EvaluationHistoryService(app)
 
 # 创建数据库表
 with app.app_context():
@@ -61,15 +64,13 @@ with app.app_context():
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/health', methods=['GET'])
 def health_check():
-    """健康检查接口"""
+    """健康检查"""
     return jsonify({
-        'status': 'ok',
-        'message': '问答评估服务运行正常',
+        'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'database': 'sqlite',
-        'version': '2.0.0'
+        'version': '2.1.0'
     })
 
 @app.route('/api/variable-info', methods=['GET'])
@@ -117,7 +118,7 @@ def evaluate():
             prompt_template = classification_service.get_prompt_template_by_classification(classification_result)
             logger.info("使用分类对应的prompt_template作为评估模板")
         
-        # 进行评估 - 使用自定义的evaluation service方法来处理所有变量
+        # 调用评估服务
         result = evaluation_service.evaluate_response(
             user_query=user_input,
             model_response=model_answer,
@@ -127,22 +128,52 @@ def evaluate():
             evaluation_criteria=evaluation_criteria
         )
         
-        # 添加分类信息到结果中
-        result['classification'] = {
-            'level1': classification_result.get('level1'),
-            'level2': classification_result.get('level2'),
-            'level3': classification_result.get('level3'),
-            'confidence': classification_result.get('confidence'),
-            'classification_time': classification_result.get('classification_time_seconds')
-        }
+        # 添加分类信息到评估结果
+        if classification_result:
+            result['classification'] = classification_result
         
-        logger.info(f"评估完成 - 总分: {result.get('score', 'N/A')}")
+        # 添加模型使用信息
+        result['model_used'] = 'deepseek-chat'  # 记录使用的模型
         
+        # 保存评估结果到历史记录
+        try:
+            # 准备保存的数据
+            save_data = {
+                'user_input': user_input,
+                'model_answer': model_answer,
+                'reference_answer': reference_answer,
+                'question_time': question_time,
+                'evaluation_criteria_used': evaluation_criteria,
+                'score': result.get('score'),
+                'dimensions': result.get('dimensions', {}),
+                'reasoning': result.get('reasoning'),
+                'evaluation_time_seconds': result.get('evaluation_time_seconds'),
+                'model_used': result.get('model_used'),
+                'raw_response': result.get('raw_response')
+            }
+            
+            # 保存到历史记录
+            save_result = evaluation_history_service.save_evaluation_result(
+                save_data, classification_result
+            )
+            
+            if save_result['success']:
+                logger.info(f"评估结果已保存到历史记录，ID: {save_result['history_id']}")
+                result['history_id'] = save_result['history_id']
+            else:
+                logger.warning(f"保存评估历史失败: {save_result['message']}")
+                
+        except Exception as save_error:
+            logger.error(f"保存评估历史时发生错误: {str(save_error)}")
+            # 不影响评估结果的返回
+        
+        logger.info(f"评估完成，总分: {result.get('score', 0)}")
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"评估失败: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"评估过程中发生错误: {str(e)}")
+        logger.error(f"错误追踪: {traceback.format_exc()}")
+        return jsonify({'error': f'评估过程中发生错误: {str(e)}'}), 500
 
 @app.route('/api/classify', methods=['POST'])
 def classify():
@@ -153,20 +184,25 @@ def classify():
         data = request.get_json()
         
         if 'userQuery' not in data:
-            return jsonify({'error': '缺少用户查询'}), 400
-            
+            return jsonify({'error': '缺少必需字段: userQuery'}), 400
+        
         user_query = data['userQuery']
         
-        # 调用分类服务
+        logger.info(f"开始分类用户输入: {user_query[:100]}...")
+        
         result = classification_service.classify_user_input(user_query)
         
-        logger.info(f"分类完成 - 结果: {result.get('level1', 'N/A')}")
-        
-        return jsonify(result)
-        
+        if result:
+            logger.info(f"分类成功: {result.get('level1', 'N/A')} -> {result.get('level2', 'N/A')} -> {result.get('level3', 'N/A')}")
+            return jsonify(result)
+        else:
+            logger.error("分类失败，返回空结果")
+            return jsonify({'error': '分类失败'}), 500
+            
     except Exception as e:
-        logger.error(f"分类失败: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"分类过程中发生错误: {str(e)}")
+        logger.error(f"错误追踪: {traceback.format_exc()}")
+        return jsonify({'error': f'分类过程中发生错误: {str(e)}'}), 500
 
 @app.route('/api/classification-standards', methods=['GET'])
 def get_classification_standards():
@@ -256,24 +292,18 @@ def get_prompt_by_classification():
 def get_evaluation_standards():
     """获取所有评估标准"""
     try:
-        category = request.args.get('category')
+        logger.info("获取所有评估标准")
         
-        if category:
-            # 获取指定分类的评估标准
-            result = evaluation_standard_service.get_evaluation_standards_by_category(category)
-        else:
-            # 获取所有评估标准
-            result = evaluation_standard_service.get_all_evaluation_standards()
+        standards = evaluation_standard_service.get_all_evaluation_standards()
         
         return jsonify({
             'success': True,
-            'data': result,
-            'count': len(result)
+            'data': standards
         })
         
     except Exception as e:
-        logger.error(f"获取评估标准失败: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"获取评估标准失败: {str(e)}")
+        return jsonify({'error': f'获取评估标准失败: {str(e)}'}), 500
 
 @app.route('/api/evaluation-standards/grouped', methods=['GET'])
 def get_evaluation_standards_grouped():
@@ -380,19 +410,124 @@ def batch_update_evaluation_standards():
 def get_evaluation_template(category):
     """根据分类获取评估模板"""
     try:
-        result = evaluation_standard_service.get_evaluation_template_by_category(category)
+        logger.info(f"获取评估模板请求: {category}")
         
-        if result is None:
-            return jsonify({'error': f'未找到分类 {category} 的评估标准'}), 404
+        template = evaluation_standard_service.get_evaluation_template_by_category(category)
         
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        if template:
+            return jsonify({
+                'success': True,
+                'data': template
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'未找到分类 {category} 的评估模板'
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"获取评估模板失败: {str(e)}")
+        return jsonify({'error': f'获取评估模板失败: {str(e)}'}), 500
+
+# ==================== 新增：评估历史管理API ==================== 
+
+@app.route('/api/evaluation-history', methods=['GET'])
+def get_evaluation_history():
+    """获取评估历史记录（分页）"""
+    try:
+        logger.info("获取评估历史记录")
+        
+        # 获取查询参数
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        classification_level2 = request.args.get('classification_level2')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        sort_by = request.args.get('sort_by', 'created_at')
+        sort_order = request.args.get('sort_order', 'desc')
+        
+        # 调用服务获取历史记录
+        result = evaluation_history_service.get_evaluation_history(
+            page=page,
+            per_page=per_page,
+            classification_level2=classification_level2,
+            start_date=start_date,
+            end_date=end_date,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
+        
+        return jsonify(result)
         
     except Exception as e:
-        logger.error(f"获取评估模板失败: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"获取评估历史失败: {str(e)}")
+        return jsonify({'error': f'获取评估历史失败: {str(e)}'}), 500
+
+@app.route('/api/evaluation-history/<int:history_id>', methods=['GET'])
+def get_evaluation_by_id(history_id):
+    """根据ID获取单个评估记录"""
+    try:
+        logger.info(f"获取评估记录: {history_id}")
+        
+        result = evaluation_history_service.get_evaluation_by_id(history_id)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取评估记录失败: {str(e)}")
+        return jsonify({'error': f'获取评估记录失败: {str(e)}'}), 500
+
+@app.route('/api/evaluation-history/<int:history_id>', methods=['DELETE'])
+def delete_evaluation(history_id):
+    """删除评估记录"""
+    try:
+        logger.info(f"删除评估记录: {history_id}")
+        
+        result = evaluation_history_service.delete_evaluation(history_id)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"删除评估记录失败: {str(e)}")
+        return jsonify({'error': f'删除评估记录失败: {str(e)}'}), 500
+
+@app.route('/api/evaluation-statistics', methods=['GET'])
+def get_evaluation_statistics():
+    """获取评估统计信息"""
+    try:
+        logger.info("获取评估统计信息")
+        
+        result = evaluation_history_service.get_evaluation_statistics()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取评估统计失败: {str(e)}")
+        return jsonify({'error': f'获取评估统计失败: {str(e)}'}), 500
+
+@app.route('/api/dimension-statistics', methods=['GET'])
+def get_dimension_statistics():
+    """获取维度统计信息"""
+    try:
+        logger.info("获取维度统计信息")
+        
+        result = evaluation_history_service.get_dimension_statistics()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取维度统计失败: {str(e)}")
+        return jsonify({'error': f'获取维度统计失败: {str(e)}'}), 500
+
+# ==================== 错误处理 ==================== 
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'API接口不存在'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': '服务器内部错误'}), 500
 
 if __name__ == '__main__':
     logger.info("启动问答评估服务...")
