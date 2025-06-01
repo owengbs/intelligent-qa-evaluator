@@ -19,7 +19,8 @@ import {
   Progress,
   Tooltip,
   message,
-  DatePicker
+  DatePicker,
+  Badge
 } from 'antd';
 import { 
   PlayCircleOutlined, 
@@ -30,13 +31,29 @@ import {
   PlusOutlined,
   ExclamationCircleOutlined,
   CheckOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  BulbOutlined,
+  LoadingOutlined,
+  ClockCircleOutlined,
+  TagOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+  SendOutlined
 } from '@ant-design/icons';
 import { submitEvaluation, clearResult, clearError, clearHistory } from '../store/evaluationSlice';
 import dayjs from 'dayjs';
+import axios from 'axios';
 
 const { TextArea } = Input;
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
+
+// 配置axios baseURL - 由于有proxy配置，可以使用相对路径
+const api = axios.create({
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
 const EvaluationForm = () => {
   const [form] = Form.useForm();
@@ -46,6 +63,10 @@ const EvaluationForm = () => {
   const [promptValidation, setPromptValidation] = useState({ isValid: true, missingVars: [] });
   const [variableHelpVisible, setVariableHelpVisible] = useState(false);
   const [forceUpdateKey, setForceUpdateKey] = useState(0);
+  const [classification, setClassification] = useState(null);
+  const [classificationLoading, setClassificationLoading] = useState(false);
+  const [showClassificationModal, setShowClassificationModal] = useState(false);
+  const [autoClassifyEnabled, setAutoClassifyEnabled] = useState(true);
   
   // 创建TextArea的ref
   const promptTextAreaRef = useRef(null);
@@ -792,206 +813,402 @@ const EvaluationForm = () => {
     </Modal>
   );
 
-  return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
+  // 新增：自动分类功能
+  const handleAutoClassify = async (userInput) => {
+    if (!userInput || !autoClassifyEnabled) return;
+    
+    try {
+      setClassificationLoading(true);
+      const response = await api.post('/api/classify', {
+        userQuery: userInput
+      });
+      
+      setClassification(response.data);
+      message.success(`问题已自动分类: ${response.data.level1} → ${response.data.level2} → ${response.data.level3}`);
+    } catch (error) {
+      console.error('自动分类失败:', error);
+      message.warning('自动分类失败，将使用默认评估模式');
+      setClassification(null);
+    } finally {
+      setClassificationLoading(false);
+    }
+  };
+
+  // 监听用户输入变化，触发自动分类
+  const handleUserInputChange = useCallback(
+    debounce((value) => {
+      if (value && value.length > 5) {
+        handleAutoClassify(value);
+      }
+    }, 1000),
+    [autoClassifyEnabled]
+  );
+
+  // 防抖函数
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // 手动分类
+  const handleManualClassify = async () => {
+    const userQuery = form.getFieldValue('userQuery');
+    if (!userQuery) {
+      message.warning('请先输入用户问题');
+      return;
+    }
+    
+    await handleAutoClassify(userQuery);
+  };
+
+  // 获取分类标签颜色
+  const getClassificationColor = (level) => {
+    const colors = {
+      '选股': 'blue',
+      '分析': 'green',
+      '决策': 'orange', 
+      '信息查询': 'purple'
+    };
+    return colors[level] || 'default';
+  };
+
+  // 渲染分类信息
+  const renderClassificationInfo = () => {
+    if (!classification) return null;
+
+    return (
       <Card 
+        size="small" 
+        style={{ 
+          marginBottom: 16,
+          background: 'linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%)',
+          border: '1px solid #1890ff'
+        }}
         title={
           <Space>
-            <Title level={3} style={{ margin: 0 }}>问答质量评估系统</Title>
-          </Space>
-        } 
-        extra={
-          <Space>
-            {history.length > 0 && (
-              <Button 
-                icon={<HistoryOutlined />}
-                onClick={() => setHistoryModalVisible(true)}
-              >
-                历史记录 ({history.length})
-              </Button>
-            )}
+            <TagOutlined style={{ color: '#1890ff' }} />
+            <Text strong style={{ color: '#1890ff' }}>智能分类结果</Text>
+            <Badge 
+              count={`置信度: ${Math.round((classification.confidence || 0) * 100)}%`} 
+              style={{ backgroundColor: classification.confidence > 0.8 ? '#52c41a' : '#faad14' }}
+            />
           </Space>
         }
-        style={{ 
-          background: 'rgba(255, 255, 255, 0.95)',
-          backdropFilter: 'blur(10px)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
-        }}
-      >
-        <Form 
-          form={form} 
-          layout="vertical"
-          onFinish={handleSubmit}
-        >
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={12}>
-              <Form.Item 
-                name="userQuery" 
-                label="用户输入"
-                rules={[{ required: true, message: '请输入用户问题' }]}
-              >
-                <TextArea 
-                  rows={4} 
-                  placeholder="请输入用户的原始问题..."
-                  showCount
-                  maxLength={1000}
-                />
-              </Form.Item>
-            </Col>
-            
-            <Col xs={24} lg={12}>
-              <Form.Item 
-                name="questionTime" 
-                label={
-                  <Space>
-                    <CalendarOutlined />
-                    <span>问题提出时间</span>
-                  </Space>
-                }
-                rules={[{ required: true, message: '请选择问题提出时间' }]}
-                extra="选择用户提出该问题的具体时间，有助于模型基于当时的情况进行准确评估"
-              >
-                <DatePicker 
-                  showTime={{ format: 'HH:mm:ss' }}
-                  format="YYYY-MM-DD HH:mm:ss"
-                  placeholder="选择问题提出时间"
-                  style={{ width: '100%' }}
-                  defaultValue={dayjs()}
-                  disabledDate={(current) => current && current > dayjs().endOf('day')}
-                />
-              </Form.Item>
-            </Col>
-            
-            <Col span={24}>
-              <Form.Item 
-                name="evaluationCriteria" 
-                label="评估标准"
-                rules={[{ required: true, message: '请输入详细的评估标准' }]}
-                extra="定义具体的评分维度、要求和评分标准，格式示例：准确性 - 具体要求 - 评分标准"
-              >
-                <TextArea 
-                  rows={6} 
-                  placeholder={`请输入详细的评估标准，例如：
-
-准确性	指数涨跌幅、行业数据与交易所一致	0-4分：数据完全正确=4分；小幅误差（±0.5%）=2分；重大错误=0分
-相关性	回答需关联问题范围（如"牛市"需结合经济周期、成交量等）	0-3分：紧密关联=3分；部分关联=1分；无关=0分
-可用性	提供关键指标对比（如行业PE分位数、资金流入排名）	0-3分：提供≥3项指标=3分；1-2项=1分；无指标=0分
-合规性	避免绝对结论（如"必定进入牛市"）	0-2分：措辞谨慎=2分；存在绝对化表述=0分`}
-                  showCount
-                  maxLength={2000}
-                />
-              </Form.Item>
-            </Col>
-            
-            <Col xs={24} lg={12}>
-              <Form.Item 
-                name="referenceAnswer" 
-                label="参考标准答案"
-                rules={[{ required: true, message: '请输入参考答案' }]}
-              >
-                <TextArea 
-                  rows={4} 
-                  placeholder="请输入参考的标准答案..."
-                  showCount
-                  maxLength={2000}
-                />
-              </Form.Item>
-            </Col>
-            
-            <Col xs={24} lg={12}>
-              <Form.Item 
-                name="modelResponse" 
-                label="模型答案"
-                rules={[{ required: true, message: '请输入待评估的模型回答' }]}
-              >
-                <TextArea 
-                  rows={4} 
-                  placeholder="请输入待评估的模型回答..."
-                  showCount
-                  maxLength={3000}
-                />
-              </Form.Item>
-            </Col>
-            
-            <Col span={24}>
-              <Form.Item 
-                name="scoringPrompt" 
-                label="打分规则 (Prompt模板)"
-                extra="使用下方按钮插入必需的变量，确保评估正确执行"
-              >
-                <div>
-                  {renderVariableButtons()}
-                  <TextArea 
-                    key={`prompt-textarea-${forceUpdateKey}`}
-                    ref={promptTextAreaRef}
-                    rows={8} 
-                    placeholder="评分规则模板..."
-                    showCount
-                    value={form.getFieldValue('scoringPrompt')}
-                    onChange={(e) => {
-                      form.setFieldsValue({ scoringPrompt: e.target.value });
-                      validatePromptVariables(e.target.value);
-                    }}
-                    style={{
-                      borderColor: promptValidation.isValid ? undefined : '#ff4d4f'
-                    }}
-                    data-testid="prompt-textarea"
-                  />
-                  {renderValidationStatus()}
-                </div>
-              </Form.Item>
-            </Col>
-          </Row>
-          
-          <Divider />
-          
-          <Space size="large">
+        extra={
+          <Space>
             <Button 
-              type="primary" 
-              size="large"
-              icon={<PlayCircleOutlined />}
-              loading={isLoading}
-              onClick={handleSubmit}
-              disabled={!promptValidation.isValid}
+              size="small" 
+              type="link"
+              onClick={() => setShowClassificationModal(true)}
             >
-              {isLoading ? '评估中...' : '开始评估'}
+              查看详情
             </Button>
-            
             <Button 
-              icon={<ClearOutlined />}
-              onClick={handleClear}
-              disabled={isLoading}
-              size="large"
+              size="small" 
+              type="link"
+              danger
+              onClick={() => setClassification(null)}
             >
-              清空表单
+              清除分类
             </Button>
           </Space>
-          
-          {/* 评估时间提示 */}
-          {!isLoading && (
-            <div style={{ marginTop: 16 }}>
-              <Alert
-                message="💡 温馨提示"
-                description="大模型评估通常需要 30-120 秒，请耐心等待。评估时间取决于内容复杂度。"
-                type="info"
-                showIcon
-                style={{ marginBottom: 0 }}
-              />
-            </div>
-          )}
-        </Form>
+        }
+      >
+        <Row gutter={[8, 8]}>
+          <Col>
+            <Tag color={getClassificationColor(classification.level1)} style={{ margin: 0 }}>
+              {classification.level1}
+            </Tag>
+          </Col>
+          <Col>
+            <Text type="secondary">→</Text>
+          </Col>
+          <Col>
+            <Tag color="default">
+              {classification.level2}
+            </Tag>
+          </Col>
+          <Col>
+            <Text type="secondary">→</Text>
+          </Col>
+          <Col>
+            <Tag color="default">
+              {classification.level3}
+            </Tag>
+          </Col>
+        </Row>
+        <Paragraph style={{ margin: '8px 0 0 0', fontSize: '12px' }}>
+          <Text type="secondary">
+            {classification.level3_definition}
+          </Text>
+        </Paragraph>
       </Card>
-      
-      {/* 评估结果显示区域 */}
-      <Spin spinning={isLoading} tip={renderLoadingTip()}>
-        {renderResult()}
-      </Spin>
-      
-      {/* 历史记录模态框 */}
-      {renderHistoryModal()}
-      
-      {/* 变量帮助模态框 */}
-      {renderVariableHelpModal()}
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+      <Row gutter={[24, 24]}>
+        <Col xs={24} lg={14}>
+          <Card
+            title={
+              <Space>
+                <RobotOutlined style={{ color: '#1890ff' }} />
+                <Title level={4} style={{ margin: 0 }}>
+                  评估信息输入
+                </Title>
+                {autoClassifyEnabled && (
+                  <Tag icon={<ThunderboltOutlined />} color="processing">
+                    智能分类已启用
+                  </Tag>
+                )}
+              </Space>
+            }
+            style={{
+              background: 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+            }}
+          >
+            <Form form={form} layout="vertical" size="large">
+              <Row gutter={[16, 0]}>
+                <Col xs={24} lg={12}>
+                  <Form.Item 
+                    name="userQuery" 
+                    label="用户输入"
+                    rules={[{ required: true, message: '请输入用户问题' }]}
+                    extra="输入用户的原始问题，系统将自动进行分类识别"
+                  >
+                    <TextArea 
+                      rows={4} 
+                      placeholder="请输入用户的原始问题..." 
+                      onChange={(e) => {
+                        // 触发自动分类
+                        handleUserInputChange(e.target.value);
+                      }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} lg={12}>
+                  <Form.Item 
+                    name="modelResponse" 
+                    label="模型回答"
+                    rules={[{ required: true, message: '请输入模型回答' }]}
+                    extra="输入待评估的模型回答内容"
+                  >
+                    <TextArea rows={4} placeholder="请输入待评估的模型回答..." />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/* 分类信息显示 */}
+              {(classification || classificationLoading) && (
+                <div style={{ marginBottom: 16 }}>
+                  {classificationLoading ? (
+                    <Card size="small" style={{ background: '#f0f0f0' }}>
+                      <Space>
+                        <Spin size="small" />
+                        <Text type="secondary">正在进行智能分类...</Text>
+                      </Space>
+                    </Card>
+                  ) : (
+                    renderClassificationInfo()
+                  )}
+                </div>
+              )}
+
+              <Row gutter={[16, 0]}>
+                <Col xs={24} lg={12}>
+                  <Form.Item 
+                    name="questionTime" 
+                    label={
+                      <Space>
+                        <CalendarOutlined />
+                        <span>问题提出时间</span>
+                      </Space>
+                    }
+                    rules={[{ required: true, message: '请选择问题提出时间' }]}
+                    extra="选择用户提出该问题的具体时间，有助于模型基于当时的情况进行准确评估"
+                  >
+                    <DatePicker 
+                      showTime={{ format: 'HH:mm:ss' }}
+                      format="YYYY-MM-DD HH:mm:ss"
+                      placeholder="选择问题提出时间"
+                      style={{ width: '100%' }}
+                      defaultValue={dayjs()}
+                      disabledDate={(current) => current && current > dayjs().endOf('day')}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} lg={12}>
+                  <Form.Item 
+                    name="referenceAnswer" 
+                    label="参考答案"
+                    rules={[{ required: true, message: '请输入参考答案' }]}
+                    extra="提供标准的参考答案作为评估基准"
+                  >
+                    <TextArea rows={3} placeholder="请输入标准参考答案..." />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item
+                name="evaluationCriteria"
+                label={
+                  <Space>
+                    <BulbOutlined />
+                    <span>评估标准</span>
+                  </Space>
+                }
+                rules={[{ required: true, message: '请输入评估标准' }]}
+                extra="定义详细的评估维度和评分规则（支持制表符分隔格式）"
+              >
+                <TextArea
+                  rows={6}
+                  placeholder="维度名称&#9;具体要求描述&#9;评分标准&#10;准确性&#9;答案与事实完全一致&#9;0-4分：完全正确=4分；轻微误差=2分；重大错误=0分"
+                  maxLength={2000}
+                  showCount
+                />
+              </Form.Item>
+
+              {/* 控制按钮区域 */}
+              <Row gutter={16} style={{ marginTop: 24 }}>
+                <Col xs={24} md={12}>
+                  <Space style={{ width: '100%' }}>
+                    <Button 
+                      type="primary" 
+                      icon={<ThunderboltOutlined />}
+                      onClick={handleManualClassify}
+                      loading={classificationLoading}
+                      disabled={!form.getFieldValue('userQuery')}
+                    >
+                      智能分类
+                    </Button>
+                    <Button 
+                      type={autoClassifyEnabled ? 'default' : 'dashed'}
+                      size="small"
+                      onClick={() => setAutoClassifyEnabled(!autoClassifyEnabled)}
+                    >
+                      {autoClassifyEnabled ? '关闭自动分类' : '开启自动分类'}
+                    </Button>
+                  </Space>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                    <Button 
+                      icon={<ClearOutlined />}
+                      onClick={handleClear}
+                    >
+                      清空表单
+                    </Button>
+                    <Button 
+                      type="primary" 
+                      icon={<SendOutlined />}
+                      onClick={handleSubmit}
+                      loading={isLoading}
+                      disabled={!promptValidation.isValid}
+                    >
+                      开始评估
+                    </Button>
+                  </Space>
+                </Col>
+              </Row>
+            </Form>
+          </Card>
+        </Col>
+
+        {/* 右侧区域保持不变 */}
+        <Col xs={24} lg={10}>
+          {/* ... existing right side code ... */}
+        </Col>
+      </Row>
+
+      {/* 分类详情模态框 */}
+      <Modal
+        title="分类详情"
+        open={showClassificationModal}
+        onCancel={() => setShowClassificationModal(false)}
+        footer={[
+          <Button key="close" onClick={() => setShowClassificationModal(false)}>
+            关闭
+          </Button>
+        ]}
+        width={600}
+      >
+        {classification && (
+          <div>
+            <Row gutter={[16, 16]}>
+              <Col span={8}>
+                <Text strong>一级分类:</Text>
+                <br />
+                <Tag color={getClassificationColor(classification.level1)} style={{ marginTop: 4 }}>
+                  {classification.level1}
+                </Tag>
+                <br />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  {classification.level1_definition}
+                </Text>
+              </Col>
+              <Col span={8}>
+                <Text strong>二级分类:</Text>
+                <br />
+                <Tag style={{ marginTop: 4 }}>
+                  {classification.level2}
+                </Tag>
+              </Col>
+              <Col span={8}>
+                <Text strong>三级分类:</Text>
+                <br />
+                <Tag style={{ marginTop: 4 }}>
+                  {classification.level3}
+                </Tag>
+                <br />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  {classification.level3_definition}
+                </Text>
+              </Col>
+            </Row>
+            
+            <Divider />
+            
+            <Row gutter={[16, 8]}>
+              <Col span={12}>
+                <Text strong>置信度:</Text>
+                <br />
+                <Progress 
+                  percent={Math.round((classification.confidence || 0) * 100)} 
+                  size="small"
+                  status={classification.confidence > 0.8 ? 'success' : 'normal'}
+                />
+              </Col>
+              <Col span={12}>
+                <Text strong>分类时间:</Text>
+                <br />
+                <Text type="secondary">
+                  {classification.classification_time_seconds}秒
+                </Text>
+              </Col>
+            </Row>
+
+            {classification.reasoning && (
+              <>
+                <Divider />
+                <Text strong>分类理由:</Text>
+                <Paragraph style={{ marginTop: 8, background: '#f0f0f0', padding: 12, borderRadius: 4 }}>
+                  {classification.reasoning}
+                </Paragraph>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
