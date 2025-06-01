@@ -29,73 +29,66 @@ class ClassificationService:
         对用户输入进行分类
         
         Args:
-            user_input: 用户输入的问题
+            user_input: 用户输入的文本
             
         Returns:
             dict: 分类结果
         """
-        start_time = time.time()
-        
         try:
-            self.logger.info(f"开始对用户输入进行分类: {user_input[:50]}...")
+            self.logger.info(f"开始分类用户输入，输入长度: {len(user_input)}")
+            start_time = time.time()
+            
+            # 获取分类标准
+            standards = self.get_classification_standards()
+            if not standards:
+                raise Exception("未找到分类标准")
             
             # 构建分类prompt
-            classification_prompt = self._build_classification_prompt(user_input)
+            prompt = self._build_classification_prompt(user_input, standards)
             
-            self.logger.info("发送分类请求到LLM API")
-            
-            # 调用LLM进行分类
-            classification_response = self.llm_client.get_evaluation(classification_prompt)
-            
-            self.logger.info("开始解析分类结果")
+            # 调用LLM进行分类，指定使用classification任务类型
+            response = self.llm_client.dialog(prompt, task_type='classification')
             
             # 解析分类结果
-            parsed_result = self._parse_classification_result(classification_response)
+            classification_result = self._parse_classification_result(response)
             
-            # 添加元数据
-            classification_time = round(time.time() - start_time, 2)
-            parsed_result.update({
-                'timestamp': datetime.now().isoformat(),
-                'model_used': self.llm_client.model_name,
-                'classification_time_seconds': classification_time,
-                'user_input': user_input
-            })
+            # 计算分类耗时
+            classification_time = time.time() - start_time
+            classification_result['classification_time_seconds'] = round(classification_time, 3)
             
-            # 保存分类历史到数据库
-            self._save_classification_history(user_input, parsed_result, classification_time)
+            # 保存分类历史
+            self._save_classification_history(user_input, classification_result, classification_time)
             
-            self.logger.info(f"分类完成，耗时: {classification_time}秒")
-            self.logger.info(f"分类结果: {parsed_result.get('level1', 'N/A')} -> {parsed_result.get('level2', 'N/A')} -> {parsed_result.get('level3', 'N/A')}")
+            self.logger.info(f"分类完成: {classification_result.get('level1')} -> {classification_result.get('level2')} -> {classification_result.get('level3')}, 耗时: {classification_time:.3f}s")
             
-            return parsed_result
+            return classification_result
             
         except Exception as e:
-            self.logger.error(f"分类过程中发生错误: {str(e)}")
+            self.logger.error(f"用户输入分类失败: {str(e)}")
             # 返回默认分类结果
             return {
                 'level1': '信息查询',
-                'level2': '通用查询', 
+                'level1_definition': '解决用户对股票市场信息的查询需求',
+                'level2': '信息查询', 
                 'level3': '通用查询',
-                'level1_definition': '通用查询',
-                'level2_definition': '通用查询',
                 'level3_definition': '一些比较泛化和轻量级的问题',
-                'confidence': 0.0,
-                'raw_response': f'分类失败: {str(e)}',
-                'timestamp': datetime.now().isoformat(),
-                'model_used': self.llm_client.model_name,
-                'classification_time_seconds': round(time.time() - start_time, 2),
-                'user_input': user_input
+                'confidence': 0.5,
+                'classification_time_seconds': 0,
+                'error': str(e)
             }
     
     def _save_classification_history(self, user_input, classification_result, classification_time):
         """保存分类历史到数据库"""
         try:
+            # 获取当前使用的模型名称
+            current_model = self.llm_client.models.get('classification', self.llm_client.default_model)
+            
             history = ClassificationHistory(
                 user_input=user_input,
                 classification_result=json.dumps(classification_result, ensure_ascii=False),
                 confidence=classification_result.get('confidence'),
                 classification_time=classification_time,
-                model_used=self.llm_client.model_name
+                model_used=current_model
             )
             
             db.session.add(history)
@@ -107,11 +100,17 @@ class ClassificationService:
             self.logger.error(f"保存分类历史失败: {str(e)}")
             db.session.rollback()
     
-    def _build_classification_prompt(self, user_input):
+    def _build_classification_prompt(self, user_input, standards):
         """构建分类prompt"""
         
+        # 记录用户输入
+        self.logger.info(f"构建分类prompt - 用户输入: '{user_input}' (长度: {len(user_input)})")
+        
         # 从数据库获取分类标准
-        classification_standards_text = self._format_classification_standards()
+        classification_standards_text = self._format_classification_standards(standards)
+        
+        # 记录分类标准
+        self.logger.debug(f"分类标准文本长度: {len(classification_standards_text)}")
         
         prompt = f"""请根据以下分类标准，对用户输入进行准确分类。
 
@@ -139,46 +138,27 @@ class ClassificationService:
 3. 必须选择已有的分类，不能创建新分类
 4. 如果不确定，选择最相近的分类"""
 
+        # 记录完整的prompt
+        self.logger.info(f"构建的完整prompt (总长度: {len(prompt)}):")
+        self.logger.info("=" * 50)
+        self.logger.info(prompt)
+        self.logger.info("=" * 50)
+
         return prompt
     
-    def _format_classification_standards(self):
+    def _format_classification_standards(self, standards):
         """从数据库格式化分类标准为文本"""
         try:
-            # 从数据库获取所有分类标准
-            standards = ClassificationStandard.query.all()
-            
-            if not standards:
-                self.logger.warning("数据库中没有找到分类标准，使用默认标准")
-                return self._get_default_standards_text()
-            
             formatted_text = ""
             
-            # 按一级分类分组
-            level1_groups = {}
-            for standard in standards:
-                level1 = standard.level1
-                if level1 not in level1_groups:
-                    level1_groups[level1] = {
-                        'definition': standard.level1_definition,
-                        'level2_groups': {}
-                    }
-                
-                level2 = standard.level2
-                if level2 not in level1_groups[level1]['level2_groups']:
-                    level1_groups[level1]['level2_groups'][level2] = []
-                
-                level1_groups[level1]['level2_groups'][level2].append(standard)
-            
             # 格式化输出
-            for level1, level1_data in level1_groups.items():
-                formatted_text += f"\n【{level1}】（{level1_data['definition']}）\n"
+            for standard in standards['standards']:
+                formatted_text += f"\n【{standard['level1']}】（{standard['level1_definition']}）\n"
                 
-                for level2, standards_list in level1_data['level2_groups'].items():
-                    formatted_text += f"  └─ {level2}\n"
-                    
-                    for standard in standards_list:
-                        formatted_text += f"     └─ {standard.level3}: {standard.level3_definition}\n"
-                        formatted_text += f"        示例: {standard.examples}\n"
+                formatted_text += f"  └─ {standard['level2']}\n"
+                
+                formatted_text += f"     └─ {standard['level3']}: {standard['level3_definition']}\n"
+                formatted_text += f"        示例: {standard['examples']}\n"
             
             return formatted_text
             

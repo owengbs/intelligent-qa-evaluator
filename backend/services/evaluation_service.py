@@ -50,10 +50,10 @@ class EvaluationService:
                 user_query, model_response, reference_answer, scoring_prompt, question_time, evaluation_criteria
             )
             
-            self.logger.info("发送请求到LLM API")
+            self.logger.info("发送请求到LLM API进行质量评估")
             
-            # 调用LLM API进行评估
-            evaluation_response = self.llm_client.get_evaluation(full_prompt)
+            # 调用LLM API进行评估，指定使用evaluation任务类型
+            evaluation_response = self.llm_client.get_evaluation(full_prompt, task_type='evaluation')
             
             self.logger.info("开始解析评估结果")
             
@@ -63,7 +63,6 @@ class EvaluationService:
             # 添加元数据
             parsed_result.update({
                 'timestamp': datetime.now().isoformat(),
-                'model_used': self.llm_client.model_name,
                 'evaluation_time_seconds': round(time.time() - start_time, 2),
                 'question_time': question_time,  # 保存问题时间
                 'evaluation_criteria_used': evaluation_criteria  # 保存评估标准
@@ -204,3 +203,86 @@ class EvaluationService:
                 dimensions[dimension] = float(match.group(1))
         
         return dimensions 
+
+    def evaluate_qa(self, user_input, model_answer, evaluation_criteria, question_time=None, prompt_template=None):
+        """
+        评估问答质量（新的统一接口）
+        
+        Args:
+            user_input: 用户输入
+            model_answer: 模型回答
+            evaluation_criteria: 评估标准
+            question_time: 问题时间
+            prompt_template: 可选的prompt模板
+            
+        Returns:
+            dict: 评估结果
+        """
+        start_time = time.time()
+        
+        try:
+            self.logger.info("开始构建QA评估prompt")
+            
+            # 如果提供了prompt模板，使用模板，否则使用默认模板
+            if prompt_template:
+                full_prompt = prompt_template
+            else:
+                full_prompt = self._get_default_qa_prompt()
+            
+            # 进行变量替换
+            full_prompt = self._replace_variables(full_prompt, {
+                'user_input': user_input,
+                'model_answer': model_answer,
+                'evaluation_criteria': evaluation_criteria,
+                'question_time': question_time or datetime.now().isoformat()
+            })
+            
+            self.logger.info("发送请求到LLM API进行QA质量评估")
+            
+            # 调用LLM API进行评估，指定使用evaluation任务类型
+            evaluation_response = self.llm_client.get_evaluation(full_prompt, task_type='evaluation')
+            
+            self.logger.info("开始解析QA评估结果")
+            
+            # 解析评估结果
+            parsed_result = self._parse_evaluation_result(evaluation_response)
+            
+            # 添加元数据
+            parsed_result.update({
+                'timestamp': datetime.now().isoformat(),
+                'evaluation_time_seconds': round(time.time() - start_time, 2),
+                'question_time': question_time,
+                'evaluation_criteria_used': evaluation_criteria,
+                'total_score': parsed_result.get('score', 0)
+            })
+            
+            self.logger.info(f"QA评估完成，总分: {parsed_result.get('score', 0)}, 耗时: {parsed_result['evaluation_time_seconds']}秒")
+            return parsed_result
+            
+        except Exception as e:
+            self.logger.error(f"QA评估过程中发生错误: {str(e)}")
+            raise e
+    
+    def _get_default_qa_prompt(self):
+        """获取默认的QA评估prompt模板"""
+        return """请根据以下评估标准对模型回答进行评分：
+
+评估标准：
+{evaluation_criteria}
+
+评估信息：
+问题时间: {question_time}
+用户输入: {user_input}
+模型回答: {model_answer}
+
+请严格按照以下格式返回评估结果:
+总分: [分数]/10
+评分理由: [详细的评分分析，按照评估标准逐项说明]"""
+    
+    def _replace_variables(self, template, variables):
+        """替换模板中的变量"""
+        result = template
+        for key, value in variables.items():
+            if value is not None:
+                result = result.replace(f'{{{key}}}', str(value))
+        return result 

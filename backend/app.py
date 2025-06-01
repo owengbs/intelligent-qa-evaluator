@@ -13,6 +13,7 @@ from models.classification import db
 # 导入服务类
 from services.evaluation_service import EvaluationService
 from services.classification_service_sqlite import ClassificationService
+from services.evaluation_standard_service import EvaluationStandardService
 from utils.logger import get_logger
 
 # 获取环境变量
@@ -36,6 +37,7 @@ db.init_app(app)
 # 创建服务实例
 evaluation_service = EvaluationService()
 classification_service = ClassificationService(app)
+evaluation_standard_service = EvaluationStandardService(app)
 
 # 创建数据库表
 with app.app_context():
@@ -52,6 +54,9 @@ with app.app_context():
             # 运行数据库初始化
             from database.init_db import init_database
             init_database()
+        
+        # 初始化评估标准数据
+        evaluation_standard_service.init_default_evaluation_standards()
             
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
@@ -93,25 +98,33 @@ def evaluate():
         
         user_input = data['user_input']
         model_answer = data['model_answer']
+        reference_answer = data.get('reference_answer', '')  # 参考答案，可选
         question_time = data.get('question_time', datetime.now().isoformat())
         evaluation_criteria = data.get('evaluation_criteria', '请评估答案的准确性、相关性和有用性')
+        scoring_prompt = data.get('scoring_prompt')  # 自定义的评分prompt
         
-        logger.info(f"开始评估 - 用户问题长度: {len(user_input)}, 模型回答长度: {len(model_answer)}, 问题时间: {question_time}, 评估标准长度: {len(evaluation_criteria)}")
+        logger.info(f"开始评估 - 用户问题长度: {len(user_input)}, 模型回答长度: {len(model_answer)}, 参考答案长度: {len(reference_answer)}, 问题时间: {question_time}, 评估标准长度: {len(evaluation_criteria)}")
         
         # 首先进行分类
         classification_result = classification_service.classify_user_input(user_input)
         logger.info(f"分类结果: {classification_result.get('level1', 'N/A')} -> {classification_result.get('level2', 'N/A')} -> {classification_result.get('level3', 'N/A')}")
         
-        # 根据分类结果选择对应的prompt模板
-        prompt_template = classification_service.get_prompt_template_by_classification(classification_result)
+        # 选择prompt模板：优先使用自定义的scoring_prompt，否则使用分类对应的prompt_template
+        if scoring_prompt:
+            prompt_template = scoring_prompt
+            logger.info("使用自定义的scoring_prompt作为评估模板")
+        else:
+            prompt_template = classification_service.get_prompt_template_by_classification(classification_result)
+            logger.info("使用分类对应的prompt_template作为评估模板")
         
-        # 进行评估
-        result = evaluation_service.evaluate_qa(
-            user_input=user_input,
-            model_answer=model_answer,
-            evaluation_criteria=evaluation_criteria,
+        # 进行评估 - 使用自定义的evaluation service方法来处理所有变量
+        result = evaluation_service.evaluate_response(
+            user_query=user_input,
+            model_response=model_answer,
+            reference_answer=reference_answer,
+            scoring_prompt=prompt_template,
             question_time=question_time,
-            prompt_template=prompt_template
+            evaluation_criteria=evaluation_criteria
         )
         
         # 添加分类信息到结果中
@@ -123,7 +136,7 @@ def evaluate():
             'classification_time': classification_result.get('classification_time_seconds')
         }
         
-        logger.info(f"评估完成 - 总分: {result.get('total_score', 'N/A')}")
+        logger.info(f"评估完成 - 总分: {result.get('score', 'N/A')}")
         
         return jsonify(result)
         
@@ -216,7 +229,7 @@ def get_classification_history():
 
 @app.route('/api/get-prompt-by-classification', methods=['POST'])
 def get_prompt_by_classification():
-    """根据分类获取prompt模板"""
+    """根据分类获取对应的Prompt模板"""
     try:
         data = request.get_json()
         
@@ -225,16 +238,160 @@ def get_prompt_by_classification():
             
         classification = data['classification']
         
-        # 调用分类服务获取prompt模板
+        # 调用分类服务获取对应的prompt模板
         prompt_template = classification_service.get_prompt_template_by_classification(classification)
         
         return jsonify({
+            'success': True,
             'prompt_template': prompt_template,
-            'timestamp': datetime.now().isoformat()
+            'classification': classification
         })
         
     except Exception as e:
-        logger.error(f"获取prompt模板失败: {e}")
+        logger.error(f"获取Prompt模板失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# 评估标准相关API接口
+@app.route('/api/evaluation-standards', methods=['GET'])
+def get_evaluation_standards():
+    """获取所有评估标准"""
+    try:
+        category = request.args.get('category')
+        
+        if category:
+            # 获取指定分类的评估标准
+            result = evaluation_standard_service.get_evaluation_standards_by_category(category)
+        else:
+            # 获取所有评估标准
+            result = evaluation_standard_service.get_all_evaluation_standards()
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'count': len(result)
+        })
+        
+    except Exception as e:
+        logger.error(f"获取评估标准失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/evaluation-standards/grouped', methods=['GET'])
+def get_evaluation_standards_grouped():
+    """按分类分组获取评估标准"""
+    try:
+        result = evaluation_standard_service.get_evaluation_standards_grouped_by_category()
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'categories': list(result.keys())
+        })
+        
+    except Exception as e:
+        logger.error(f"获取分组评估标准失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/evaluation-standards', methods=['POST'])
+def create_evaluation_standard():
+    """创建新的评估标准"""
+    try:
+        data = request.get_json()
+        
+        # 验证必要字段
+        required_fields = ['level2_category', 'dimension', 'reference_standard', 'scoring_principle']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'缺少必要字段: {field}'}), 400
+        
+        result = evaluation_standard_service.create_evaluation_standard(data)
+        
+        return jsonify({
+            'success': True,
+            'message': '评估标准创建成功',
+            'data': result
+        })
+        
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"创建评估标准失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/evaluation-standards/<int:standard_id>', methods=['PUT'])
+def update_evaluation_standard(standard_id):
+    """更新评估标准"""
+    try:
+        data = request.get_json()
+        
+        result = evaluation_standard_service.update_evaluation_standard(standard_id, data)
+        
+        return jsonify({
+            'success': True,
+            'message': '评估标准更新成功',
+            'data': result
+        })
+        
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"更新评估标准失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/evaluation-standards/<int:standard_id>', methods=['DELETE'])
+def delete_evaluation_standard(standard_id):
+    """删除评估标准"""
+    try:
+        evaluation_standard_service.delete_evaluation_standard(standard_id)
+        
+        return jsonify({
+            'success': True,
+            'message': '评估标准删除成功'
+        })
+        
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"删除评估标准失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/evaluation-standards/batch', methods=['POST'])
+def batch_update_evaluation_standards():
+    """批量更新评估标准"""
+    try:
+        data = request.get_json()
+        
+        if 'standards' not in data:
+            return jsonify({'error': '缺少评估标准数据'}), 400
+        
+        standards_list = data['standards']
+        updated_count = evaluation_standard_service.batch_update_evaluation_standards(standards_list)
+        
+        return jsonify({
+            'success': True,
+            'message': f'批量更新完成，共处理 {updated_count} 条评估标准',
+            'updated_count': updated_count
+        })
+        
+    except Exception as e:
+        logger.error(f"批量更新评估标准失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/evaluation-template/<category>', methods=['GET'])
+def get_evaluation_template(category):
+    """根据分类获取评估模板"""
+    try:
+        result = evaluation_standard_service.get_evaluation_template_by_category(category)
+        
+        if result is None:
+            return jsonify({'error': f'未找到分类 {category} 的评估标准'}), 404
+        
+        return jsonify({
+            'success': True,
+            'data': result
+        })
+        
+    except Exception as e:
+        logger.error(f"获取评估模板失败: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
