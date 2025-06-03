@@ -39,8 +39,10 @@ class EvaluationHistoryService:
                 'model_answer': evaluation_data.get('model_answer'),
                 'reference_answer': evaluation_data.get('reference_answer'),
                 'question_time': evaluation_data.get('question_time'),
-                'evaluation_criteria': evaluation_data.get('evaluation_criteria_used'),
-                'total_score': evaluation_data.get('score', 0.0),
+                # 兼容前端发送的字段名
+                'evaluation_criteria': evaluation_data.get('evaluation_criteria') or evaluation_data.get('evaluation_criteria_used'),
+                # 兼容前端发送的字段名
+                'total_score': evaluation_data.get('total_score') or evaluation_data.get('score', 0.0),
                 'dimensions': evaluation_data.get('dimensions', {}),
                 'reasoning': evaluation_data.get('reasoning'),
                 'evaluation_time_seconds': evaluation_data.get('evaluation_time_seconds'),
