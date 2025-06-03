@@ -1,0 +1,97 @@
+{
+  "export_time": "2025-06-03T10:30:00",
+  "description": "演示配置变更 - 模拟删除了部分配置标准",
+  "count": 10,
+  "data": [
+    {
+      "level1": "选股",
+      "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求",
+      "level2": "选股",
+      "level3": "策略选股",
+      "level3_definition": "策略条件出发，希望得到满足至少一个条件的股票池",
+      "examples": "昨天涨停的票，今天下跌的票，今天主力资金净流入的票，以上条件必须都符合的票是哪支股票",
+      "is_default": true
+    },
+    {
+      "level1": "选股",
+      "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求",
+      "level2": "选股",
+      "level3": "概念板块选股",
+      "level3_definition": "主要是问询某个板块/概念下的股票池",
+      "examples": "ai智能电力包括哪些股票",
+      "is_default": true
+    },
+    {
+      "level1": "选股",
+      "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求",
+      "level2": "选股",
+      "level3": "模糊推荐",
+      "level3_definition": "提问很模糊，想知道近期的热门/优秀的公司，未指明范围",
+      "examples": "推荐几只股票",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "宏观经济分析",
+      "level3": "宏观经济分析",
+      "level3_definition": "主要是跟宏观经济数据相关的问题",
+      "examples": "美国的CPI会超预期吗？",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "大盘行业分析",
+      "level3": "大盘行业分析",
+      "level3_definition": "大盘或具体某个/某些指数、板块、行业相关的内容",
+      "examples": "今天大盘怎么样？现在是牛市吗？",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "个股分析",
+      "level3": "综合分析",
+      "level3_definition": "包括纯标的等，及分析多个标的（未指明某一维度）之间的对比",
+      "examples": "纯标的输入：000001 或者 中国平安；璞泰来与宝明科技比较",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "个股分析",
+      "level3": "基本面分析",
+      "level3_definition": "基于基本面的分析，也包含股东、高管、机构的增减持情况",
+      "examples": "600758股票有什么核心竞争力",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "个股分析",
+      "level3": "基本面分析-财务分析",
+      "level3_definition": "专门针对公司业绩、财报情况的提问",
+      "examples": "瑞可达2025年收入和利润增速预期",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "个股分析",
+      "level3": "消息面分析",
+      "level3_definition": "询问近期的大事、热点等",
+      "examples": "紫光股份的近期热点",
+      "is_default": true
+    },
+    {
+      "level1": "分析",
+      "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+      "level2": "个股分析",
+      "level3": "个股异动及涨跌归因",
+      "level3_definition": "明确问涨跌原因或异动原因",
+      "examples": "xx大涨是为啥？",
+      "is_default": true
+    }
+  ]
+}

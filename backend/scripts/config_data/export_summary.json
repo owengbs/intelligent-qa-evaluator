@@ -1,0 +1,14 @@
+{
+  "export_time": "2025-06-03T10:31:07.046917",
+  "version": "2.3.0",
+  "sync_mode": "full_replace",
+  "classification_standards_count": 10,
+  "evaluation_standards_count": 28,
+  "total_records": 38,
+  "files": [
+    "classification_standards.json",
+    "evaluation_standards.json"
+  ],
+  "description": "AI评估系统配置数据全量导出摘要 - 支持完整替换同步",
+  "warning": "导入时将完全替换现有配置数据，请确保备份"
+}
