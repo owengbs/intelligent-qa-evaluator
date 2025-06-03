@@ -17,13 +17,48 @@ class Config:
         """数据类初始化后设置数据库URI"""
         # 使用绝对路径确保数据库文件可以正确创建和访问
         base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 创建数据库目录（如果不存在）
+        db_dir = os.path.join(base_dir, 'database')
+        if not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            print(f"📁 创建数据库目录: {db_dir}")
+        
+        # 构建数据库文件完整路径
         db_path = os.path.join(base_dir, self.DATABASE_PATH)
+        
+        # 生产环境额外路径检查和权限验证
+        if hasattr(self, 'ENVIRONMENT') and self.ENVIRONMENT == 'production':
+            # 检查目录写入权限
+            if not os.access(db_dir, os.W_OK):
+                print(f"⚠️  警告: 数据库目录无写入权限: {db_dir}")
+                # 尝试使用临时目录作为备选
+                import tempfile
+                temp_db_dir = os.path.join(tempfile.gettempdir(), 'qa_evaluator_db')
+                os.makedirs(temp_db_dir, exist_ok=True)
+                db_path = os.path.join(temp_db_dir, 'qa_evaluation.db')
+                print(f"🔄 使用临时数据库路径: {db_path}")
+        
         self.SQLALCHEMY_DATABASE_URI = f'sqlite:///{db_path}'
         self.SQLALCHEMY_TRACK_MODIFICATIONS = False
+        
+        # 调试信息
+        print(f"💾 数据库配置:")
+        print(f"   - 基础目录: {base_dir}")
+        print(f"   - 数据库路径: {db_path}")
+        print(f"   - 数据库URI: {self.SQLALCHEMY_DATABASE_URI}")
     
     # 日志配置
     LOG_LEVEL = 'INFO'
     LOG_FILE = 'logs/app.log'
+    
+    def setup_logging(self):
+        """配置日志目录"""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        log_dir = os.path.join(base_dir, 'logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+            print(f"📁 创建日志目录: {log_dir}")
     
     # LLM配置
     LLM_MODEL = 'deepseek-v3-local-II'
@@ -73,6 +108,13 @@ class ProductionConfig(Config):
     
     # 生产环境特定配置
     LOG_LEVEL = 'WARNING'
+    
+    def __post_init__(self):
+        """生产环境初始化"""
+        super().__post_init__()
+        # 设置日志
+        self.setup_logging()
+        print(f"🌐 生产环境配置完成")
 
 def get_config():
     """根据环境变量获取配置"""
