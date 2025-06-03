@@ -4,7 +4,8 @@ REACT_APP_ENV=local
 
 # 本地服务器配置
 PORT=3000
-HOST=localhost
+HOST=0.0.0.0
+DANGEROUSLY_DISABLE_HOST_CHECK=true
 
 # 开发环境特定配置
 GENERATE_SOURCEMAP=true
