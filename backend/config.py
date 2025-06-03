@@ -12,6 +12,8 @@ class Config:
     """基础配置类"""
     # 数据库配置
     DATABASE_PATH = 'database/qa_evaluation.db'
+    SQLALCHEMY_DATABASE_URI = f'sqlite:///{DATABASE_PATH}'
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # 日志配置
     LOG_LEVEL = 'INFO'

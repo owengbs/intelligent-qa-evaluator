@@ -18,14 +18,11 @@ from services.evaluation_standard_service import EvaluationStandardService
 from services.evaluation_history_service import EvaluationHistoryService
 from utils.logger import get_logger
 
-# 获取环境变量
-env = os.environ.get('FLASK_ENV', 'development')
-
 # 创建Flask应用
 app = Flask(__name__)
 
-# 加载配置
-app.config.from_object(config[env])
+# 加载配置 - 直接使用config对象而不是config[env]
+app.config.from_object(config)
 
 # 启用CORS
 CORS(app)
