@@ -1,0 +1,8 @@
+{
+  "timestamp": "2025-06-03T10:41:54.314285",
+  "success": false,
+  "issues_count": 1,
+  "issues": [
+    "❌ 缺少依赖: openai"
+  ]
+}

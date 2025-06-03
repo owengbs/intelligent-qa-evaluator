@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-06-03T10:41:41.263518",
+  "success": false,
+  "issues_count": 6,
+  "issues": [
+    "❌ 缺少文件: app.py",
+    "❌ 缺少文件: config.py",
+    "❌ 缺少文件: requirements.txt",
+    "❌ 缺少依赖: openai",
+    "❌ 数据库文件不存在: data/qa_evaluator.db",
+    "⚠️  配置数据目录不存在: scripts/config_data"
+  ]
+}
