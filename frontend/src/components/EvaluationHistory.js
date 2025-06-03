@@ -270,6 +270,36 @@ const EvaluationHistory = () => {
       }
     },
     {
+      title: '人工评估',
+      dataIndex: 'human_total_score',
+      key: 'human_evaluation',
+      width: 120,
+      render: (humanScore, record) => {
+        if (humanScore !== null && humanScore !== undefined) {
+          return (
+            <Space direction="vertical" size={2}>
+              <Text style={{ 
+                color: getScoreColor(humanScore),
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}>
+                👨‍💼 {humanScore}/10
+              </Text>
+              <Tag color="purple" size="small">
+                已人工评估
+              </Tag>
+            </Space>
+          );
+        } else {
+          return (
+            <Tag color="default" size="small">
+              仅AI评估
+            </Tag>
+          );
+        }
+      }
+    },
+    {
       title: '评估时间',
       dataIndex: 'created_at',
       key: 'created_at',
@@ -532,6 +562,132 @@ const EvaluationHistory = () => {
                 </Paragraph>
               </Card>
             </Col>
+
+            {/* 人工评估信息 */}
+            {(selectedRecord.human_total_score !== null && selectedRecord.human_total_score !== undefined) && (
+              <Col span={24}>
+                <Card 
+                  size="small" 
+                  title={
+                    <Space>
+                      <span style={{ fontSize: '16px' }}>👨‍💼</span>
+                      人工评估结果
+                    </Space>
+                  }
+                  style={{
+                    background: 'linear-gradient(135deg, #f0f2ff 0%, #ffffff 100%)',
+                    border: '1px solid #d6e4ff'
+                  }}
+                >
+                  <Row gutter={[16, 16]}>
+                    <Col span={12}>
+                      <Text strong>人工评估总分: </Text>
+                      <Text style={{ 
+                        color: getScoreColor(selectedRecord.human_total_score),
+                        fontWeight: 'bold',
+                        fontSize: '18px'
+                      }}>
+                        {selectedRecord.human_total_score}/10
+                      </Text>
+                      <Tag color={getScoreLevel(selectedRecord.human_total_score).color} style={{ marginLeft: 8 }}>
+                        {getScoreLevel(selectedRecord.human_total_score).text}
+                      </Tag>
+                    </Col>
+                    <Col span={12}>
+                      <Text strong>评估者: </Text>
+                      <Text>{selectedRecord.evaluator_name || '评估专家'}</Text>
+                    </Col>
+                    <Col span={12}>
+                      <Text strong>人工评估时间: </Text>
+                      <Text>
+                        {selectedRecord.human_evaluation_time ? 
+                          new Date(selectedRecord.human_evaluation_time).toLocaleString() : 
+                          '未记录'
+                        }
+                      </Text>
+                    </Col>
+                    <Col span={12}>
+                      <Text strong>评分差异: </Text>
+                      <Text style={{ 
+                        color: Math.abs(selectedRecord.human_total_score - selectedRecord.total_score) > 1 ? '#ff4d4f' : '#52c41a',
+                        fontWeight: 'bold'
+                      }}>
+                        {selectedRecord.human_total_score > selectedRecord.total_score ? '+' : ''}
+                        {(selectedRecord.human_total_score - selectedRecord.total_score).toFixed(1)}
+                      </Text>
+                    </Col>
+                    
+                    {/* 人工维度评分 */}
+                    {selectedRecord.human_dimensions && Object.keys(selectedRecord.human_dimensions).length > 0 && (
+                      <Col span={24}>
+                        <Text strong style={{ color: '#1890ff' }}>人工维度评分:</Text>
+                        <Row gutter={[8, 8]} style={{ marginTop: 8 }}>
+                          {Object.entries(selectedRecord.human_dimensions).map(([key, value]) => {
+                            const aiScore = selectedRecord.dimensions ? selectedRecord.dimensions[key] : null;
+                            const diff = aiScore !== null ? (value - aiScore).toFixed(1) : null;
+                            
+                            return (
+                              <Col xs={12} sm={8} md={6} key={key}>
+                                <div style={{
+                                  padding: '8px',
+                                  background: '#f8f9fa',
+                                  borderRadius: '4px',
+                                  border: '1px solid #e9ecef'
+                                }}>
+                                  <Text strong style={{ fontSize: '12px' }}>
+                                    {dimensionNames[key] || key}
+                                  </Text>
+                                  <div>
+                                    <Text style={{ color: getScoreColor(value * 2.5) }}>
+                                      👨‍💼 {value}
+                                    </Text>
+                                    {aiScore !== null && (
+                                      <>
+                                        <Text type="secondary"> vs </Text>
+                                        <Text style={{ color: getScoreColor(aiScore * 2.5) }}>
+                                          🤖 {aiScore}
+                                        </Text>
+                                        {diff !== null && (
+                                          <Text style={{ 
+                                            color: Math.abs(diff) > 0.5 ? '#ff4d4f' : '#52c41a',
+                                            fontSize: '11px',
+                                            marginLeft: 4
+                                          }}>
+                                            ({diff > 0 ? '+' : ''}{diff})
+                                          </Text>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </Col>
+                            );
+                          })}
+                        </Row>
+                      </Col>
+                    )}
+                    
+                    {/* 人工评估意见 */}
+                    {selectedRecord.human_reasoning && (
+                      <Col span={24}>
+                        <Text strong style={{ color: '#1890ff' }}>人工评估意见:</Text>
+                        <Paragraph style={{ 
+                          marginTop: 8,
+                          padding: '12px',
+                          background: '#f0f2ff',
+                          borderRadius: '6px',
+                          border: '1px solid #d6e4ff',
+                          whiteSpace: 'pre-line',
+                          lineHeight: 1.6
+                        }}>
+                          {selectedRecord.human_reasoning}
+                        </Paragraph>
+                      </Col>
+                    )}
+                  </Row>
+                </Card>
+              </Col>
+            )}
           </Row>
         </div>
       )}

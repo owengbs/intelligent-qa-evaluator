@@ -19,7 +19,8 @@ import {
   Progress,
   message,
   DatePicker,
-  Badge
+  Badge,
+  InputNumber
 } from 'antd';
 import { 
   ClearOutlined, 
@@ -57,6 +58,12 @@ const EvaluationForm = () => {
   const [classificationLoading, setClassificationLoading] = useState(false);
   const [showClassificationModal, setShowClassificationModal] = useState(false);
   const [autoClassifyEnabled, setAutoClassifyEnabled] = useState(true);
+  
+  // 人工评估相关状态
+  const [humanEvaluationVisible, setHumanEvaluationVisible] = useState(false);
+  const [humanEvaluationLoading, setHumanEvaluationLoading] = useState(false);
+  const [humanForm] = Form.useForm();
+  const [currentHistoryId, setCurrentHistoryId] = useState(null);
   
   // Redux状态
   const { isLoading, result, error, history } = useSelector((state) => state.evaluation);
@@ -200,10 +207,210 @@ ${dimensionRequirements}
       evaluationCriteria: defaultEvaluationCriteria,
       questionTime: dayjs()
     });
-    
     dispatch(clearResult());
-    dispatch(clearError());
     setClassification(null);
+  };
+
+  // 人工评估相关函数
+  const handleHumanEvaluation = () => {
+    if (!result || !result.history_id) {
+      message.error('无法获取评估记录ID，请重新评估');
+      return;
+    }
+    
+    setCurrentHistoryId(result.history_id);
+    
+    // 初始化人工评估表单，填入当前AI评估结果
+    const initialValues = {
+      human_total_score: result.score,
+      human_reasoning: '',
+      evaluator_name: '评估专家'
+    };
+    
+    // 初始化各维度分数
+    if (result.dimensions) {
+      Object.entries(result.dimensions).forEach(([key, value]) => {
+        initialValues[`dimension_${key}`] = value;
+      });
+    }
+    
+    humanForm.setFieldsValue(initialValues);
+    setHumanEvaluationVisible(true);
+  };
+
+  const handleHumanEvaluationSubmit = async () => {
+    try {
+      setHumanEvaluationLoading(true);
+      const values = await humanForm.validateFields();
+      
+      // 构建人工评估数据
+      const humanData = {
+        human_total_score: values.human_total_score,
+        human_reasoning: values.human_reasoning,
+        evaluator_name: values.evaluator_name || '评估专家'
+      };
+      
+      // 收集各维度分数
+      const humanDimensions = {};
+      Object.keys(values).forEach(key => {
+        if (key.startsWith('dimension_')) {
+          const dimensionKey = key.replace('dimension_', '');
+          humanDimensions[dimensionKey] = values[key];
+        }
+      });
+      
+      if (Object.keys(humanDimensions).length > 0) {
+        humanData.human_dimensions = humanDimensions;
+      }
+      
+      // 调用API更新人工评估
+      const response = await api.put(`/api/evaluation-history/${currentHistoryId}/human-evaluation`, humanData);
+      
+      if (response.data.success) {
+        message.success('人工评估保存成功');
+        setHumanEvaluationVisible(false);
+        
+        // 更新当前显示的结果（如果需要）
+        // 这里可以选择重新获取评估结果或者直接更新当前结果
+      } else {
+        message.error(response.data.message || '人工评估保存失败');
+      }
+      
+    } catch (error) {
+      console.error('人工评估提交失败:', error);
+      message.error('人工评估提交失败，请重试');
+    } finally {
+      setHumanEvaluationLoading(false);
+    }
+  };
+
+  const renderHumanEvaluationModal = () => {
+    if (!result) return null;
+    
+    return (
+      <Modal
+        title={
+          <Space>
+            <span style={{ fontSize: '20px' }}>👨‍💼</span>
+            人工评估修正
+          </Space>
+        }
+        open={humanEvaluationVisible}
+        onCancel={() => setHumanEvaluationVisible(false)}
+        onOk={handleHumanEvaluationSubmit}
+        okText="保存评估"
+        cancelText="取消"
+        width={800}
+        confirmLoading={humanEvaluationLoading}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Alert
+            message="人工评估说明"
+            description="您可以基于AI评估结果进行调整和修正，补充您的专业评估意见。修改后的评估结果将保存为最终评估结果。"
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        </div>
+        
+        <Form
+          form={humanForm}
+          layout="vertical"
+          initialValues={{
+            human_total_score: result.score,
+            evaluator_name: '评估专家'
+          }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                label="评估者姓名"
+                name="evaluator_name"
+                rules={[{ required: true, message: '请输入评估者姓名' }]}
+              >
+                <Input placeholder="请输入您的姓名" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="人工总分"
+                name="human_total_score"
+                rules={[
+                  { required: true, message: '请输入总分' },
+                  { type: 'number', min: 0, max: 10, message: '总分应在0-10之间' }
+                ]}
+              >
+                <InputNumber 
+                  step={0.1} 
+                  min={0} 
+                  max={10} 
+                  placeholder="0-10分"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          
+          {/* 各维度分数调整 */}
+          {result.dimensions && Object.keys(result.dimensions).length > 0 && (
+            <>
+              <Divider orientation="left">各维度分数调整</Divider>
+              <Row gutter={[16, 16]}>
+                {Object.entries(result.dimensions).map(([key, value]) => {
+                  const dimensionNames = {
+                    accuracy: '准确性',
+                    completeness: '完整性',
+                    fluency: '流畅性',
+                    safety: '安全性',
+                    relevance: '相关性',
+                    clarity: '清晰度',
+                    timeliness: '时效性',
+                    usability: '可用性',
+                    compliance: '合规性'
+                  };
+                  
+                  const criteriaText = form.getFieldValue('evaluationCriteria') || '';
+                  const maxScore = getDimensionMaxScore(key, criteriaText);
+                  const displayName = dimensionNames[key] || key.charAt(0).toUpperCase() + key.slice(1);
+                  
+                  return (
+                    <Col span={8} key={key}>
+                      <Form.Item
+                        label={`${displayName} (AI评分: ${value}/${maxScore})`}
+                        name={`dimension_${key}`}
+                        rules={[
+                          { required: true, message: `请输入${displayName}分数` },
+                          { type: 'number', min: 0, max: maxScore, message: `分数应在0-${maxScore}之间` }
+                        ]}
+                      >
+                        <InputNumber 
+                          step={0.1} 
+                          min={0} 
+                          max={maxScore} 
+                          placeholder={`0-${maxScore}分`}
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  );
+                })}
+              </Row>
+            </>
+          )}
+          
+          <Form.Item
+            label="人工评估意见"
+            name="human_reasoning"
+            rules={[{ required: true, message: '请输入您的评估意见' }]}
+          >
+            <TextArea
+              rows={6}
+              placeholder="请详细说明您的评估理由，包括与AI评估的差异原因、专业判断依据等..."
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+    );
   };
 
   // 获取评分等级颜色
@@ -337,7 +544,20 @@ ${dimensionRequirements}
             评估结果
           </Space>
         }
-        extra={<Text type="secondary">{new Date(result.timestamp).toLocaleString()}</Text>}
+        extra={
+          <Space>
+            <Button
+              type="primary"
+              ghost
+              size="small"
+              icon={<span style={{ fontSize: '14px' }}>👨‍💼</span>}
+              onClick={handleHumanEvaluation}
+            >
+              人工评估
+            </Button>
+            <Text type="secondary">{new Date(result.timestamp).toLocaleString()}</Text>
+          </Space>
+        }
         style={{ marginTop: 24 }}
       >
         <Row gutter={[16, 16]}>
@@ -1411,6 +1631,9 @@ ${dimensionRequirements}
 
       {/* 变量帮助模态框 */}
       {renderVariableHelpModal()}
+
+      {/* 人工评估模态框 */}
+      {renderHumanEvaluationModal()}
     </div>
   );
 };

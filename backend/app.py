@@ -491,6 +491,34 @@ def delete_evaluation(history_id):
         logger.error(f"删除评估记录失败: {str(e)}")
         return jsonify({'error': f'删除评估记录失败: {str(e)}'}), 500
 
+@app.route('/api/evaluation-history/<int:history_id>/human-evaluation', methods=['PUT'])
+def update_human_evaluation(history_id):
+    """更新人工评估结果"""
+    try:
+        logger.info(f"更新人工评估: {history_id}")
+        
+        data = request.get_json()
+        
+        # 验证必要字段
+        if not data:
+            return jsonify({'error': '缺少评估数据'}), 400
+        
+        # 获取评估者姓名（可以从请求头或session中获取，这里暂时使用默认值）
+        evaluator_name = data.get('evaluator_name', '匿名用户')
+        
+        # 调用服务更新人工评估
+        result = evaluation_history_service.update_human_evaluation(
+            history_id=history_id,
+            human_data=data,
+            evaluator_name=evaluator_name
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"更新人工评估失败: {str(e)}")
+        return jsonify({'error': f'更新人工评估失败: {str(e)}'}), 500
+
 @app.route('/api/evaluation-statistics', methods=['GET'])
 def get_evaluation_statistics():
     """获取评估统计信息"""

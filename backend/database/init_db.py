@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 数据库初始化脚本
 """
@@ -6,6 +7,7 @@ import sys
 import sqlite3
 import json
 from datetime import datetime
+import logging
 
 # 添加父目录到Python路径，确保可以导入模块
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,12 +19,30 @@ try:
     from config import Config
     from models.classification import db, ClassificationStandard, EvaluationStandard, EvaluationHistory
     from utils.logger import get_logger
+    from sqlalchemy import text
 except ImportError as e:
     print(f"导入模块失败: {e}")
     print("请确保在项目根目录下运行此脚本")
     sys.exit(1)
 
-logger = get_logger(__name__)
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def create_app():
+    """创建Flask应用"""
+    app = Flask(__name__)
+    
+    # 数据库配置
+    database_path = os.path.join(parent_dir, 'data', 'qa_evaluator.db')
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{database_path}'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # 确保数据目录存在
+    os.makedirs(os.path.dirname(database_path), exist_ok=True)
+    
+    db.init_app(app)
+    return app
 
 def create_tables():
     """创建数据库表"""
@@ -36,375 +56,161 @@ def create_tables():
         return False
 
 def init_database():
-    """初始化数据库和表"""
-    try:
-        logger.info("开始初始化数据库...")
+    """初始化数据库"""
+    logger.info("开始初始化数据库...")
+    
+    # 创建所有表
+    db.create_all()
+    logger.info("数据库表创建完成")
+    
+    # 检查并添加人工评估字段
+    check_and_add_human_evaluation_columns()
+    
+    # 检查是否已有默认数据
+    existing_standards = ClassificationStandard.query.filter_by(is_default=True).count()
+    if existing_standards > 0:
+        logger.info(f"发现 {existing_standards} 条默认分类标准，跳过初始化")
+        return
+    
+    logger.info("开始插入默认分类标准...")
+    
+    # 默认分类标准数据
+    default_standards = [
+        {
+            "level1": "选股",
+            "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求",
+            "level2": "选股",
+            "level3": "策略选股",
+            "level3_definition": "策略条件出发，希望得到满足至少一个条件的股票池",
+            "examples": "昨天涨停的票，今天下跌的票，今天主力资金净流入的票",
+            "is_default": True
+        },
+        {
+            "level1": "选股",
+            "level1_definition": "解决用户没有明确标的时，筛选投资标的的需求", 
+            "level2": "选股",
+            "level3": "概念板块选股",
+            "level3_definition": "主要是问询某个板块/概念下的股票池",
+            "examples": "ai智能电力包括哪些股票",
+            "is_default": True
+        },
+        {
+            "level1": "分析",
+            "level1_definition": "解决用户有明确投资标的时，该标的是否值得买的问题",
+            "level2": "个股分析",
+            "level3": "综合分析",
+            "level3_definition": "包括纯标的等，及分析多个标的之间的对比",
+            "examples": "纯标的输入：000001 或者 中国平安",
+            "is_default": True
+        },
+        {
+            "level1": "决策",
+            "level1_definition": "解决用户买卖时机和价格的问题", 
+            "level2": "个股决策",
+            "level3": "操作建议",
+            "level3_definition": "对明确标的的投资操作问询",
+            "examples": "600900股票今天可以买入了吗",
+            "is_default": True
+        },
+        {
+            "level1": "信息查询",
+            "level1_definition": "通用查询",
+            "level2": "通用查询",
+            "level3": "通用查询",
+            "level3_definition": "一些比较泛化和轻量级的问题",
+            "examples": "XX公司什么时候上市",
+            "is_default": True
+        }
+    ]
+    
+    # 插入默认分类标准
+    for standard_data in default_standards:
+        standard = ClassificationStandard.from_dict(standard_data)
+        db.session.add(standard)
+    
+    logger.info("开始插入默认评估标准...")
+    
+    # 默认评估标准数据
+    default_evaluation_standards = [
+        # 选股类评估标准
+        {"level2_category": "选股", "dimension": "准确性", "reference_standard": "推荐股票信息准确，代码、名称、基本数据无误", "scoring_principle": "0-4分：信息完全准确=4分；轻微错误=2分；重大错误=0分", "max_score": 4, "is_default": True},
+        {"level2_category": "选股", "dimension": "策略性", "reference_standard": "选股策略清晰合理，逻辑完整", "scoring_principle": "0-3分：策略完整合理=3分；基本合理=2分；策略不清=0分", "max_score": 3, "is_default": True},
+        {"level2_category": "选股", "dimension": "风险提示", "reference_standard": "充分说明投资风险", "scoring_principle": "0-2分：风险提示充分=2分；基本提示=1分；无风险提示=0分", "max_score": 2, "is_default": True},
+        {"level2_category": "选股", "dimension": "实用性", "reference_standard": "推荐结果有实际参考价值", "scoring_principle": "0-1分：实用性强=1分；实用性差=0分", "max_score": 1, "is_default": True},
         
-        # 创建所有表
-        db.create_all()
-        logger.info("数据库表创建完成")
+        # 个股分析类评估标准
+        {"level2_category": "个股分析", "dimension": "准确性", "reference_standard": "财务数据、行业信息、公司情况等准确无误", "scoring_principle": "0-4分：数据完全准确=4分；轻微误差=2分；重大错误=0分", "max_score": 4, "is_default": True},
+        {"level2_category": "个股分析", "dimension": "深度", "reference_standard": "分析深入全面，涵盖多个方面", "scoring_principle": "0-3分：分析深入全面=3分；基本到位=2分；浅显=1分；无分析=0分", "max_score": 3, "is_default": True},
+        {"level2_category": "个股分析", "dimension": "逻辑性", "reference_standard": "分析逻辑清晰，结论有据", "scoring_principle": "0-2分：逻辑清晰=2分；基本合理=1分；逻辑混乱=0分", "max_score": 2, "is_default": True},
+        {"level2_category": "个股分析", "dimension": "客观性", "reference_standard": "分析客观中立", "scoring_principle": "0-1分：客观中立=1分；主观偏向=0分", "max_score": 1, "is_default": True},
         
-        # 初始化分类标准
-        init_classification_standards()
+        # 个股决策类评估标准  
+        {"level2_category": "个股决策", "dimension": "准确性", "reference_standard": "决策建议基于准确的数据和分析", "scoring_principle": "0-4分：依据完全准确=4分；基本准确=2分；依据错误=0分", "max_score": 4, "is_default": True},
+        {"level2_category": "个股决策", "dimension": "合理性", "reference_standard": "投资建议合理可行", "scoring_principle": "0-3分：建议非常合理=3分；基本合理=2分；不够合理=1分；不合理=0分", "max_score": 3, "is_default": True},
+        {"level2_category": "个股决策", "dimension": "风险控制", "reference_standard": "提供明确的风险控制措施", "scoring_principle": "0-2分：风险控制完善=2分；基本控制=1分；无风险控制=0分", "max_score": 2, "is_default": True},
+        {"level2_category": "个股决策", "dimension": "可操作性", "reference_standard": "建议具体明确，可直接指导操作", "scoring_principle": "0-1分：建议具体可操作=1分；建议模糊=0分", "max_score": 1, "is_default": True},
         
-        # 初始化评估标准
-        init_evaluation_standards()
-        
-        logger.info("数据库初始化完成")
-        return True
-        
-    except Exception as e:
-        logger.error(f"数据库初始化失败: {str(e)}")
-        return False
+        # 通用查询类评估标准
+        {"level2_category": "通用查询", "dimension": "准确性", "reference_standard": "查询信息准确无误", "scoring_principle": "0-4分：信息完全准确=4分；轻微误差=2分；重大错误=0分", "max_score": 4, "is_default": True},
+        {"level2_category": "通用查询", "dimension": "完整性", "reference_standard": "回答涵盖问题的所有要点", "scoring_principle": "0-3分：回答完整=3分；基本完整=2分；不够完整=1分；不完整=0分", "max_score": 3, "is_default": True},
+        {"level2_category": "通用查询", "dimension": "清晰度", "reference_standard": "表达清楚易懂，条理清晰", "scoring_principle": "0-2分：表达清晰=2分；基本清晰=1分；表达混乱=0分", "max_score": 2, "is_default": True},
+        {"level2_category": "通用查询", "dimension": "相关性", "reference_standard": "回答与问题高度相关", "scoring_principle": "0-1分：高度相关=1分；相关性差=0分", "max_score": 1, "is_default": True}
+    ]
+    
+    # 插入默认评估标准
+    for standard_data in default_evaluation_standards:
+        standard = EvaluationStandard.from_dict(standard_data)
+        db.session.add(standard)
+    
+    # 提交所有更改
+    db.session.commit()
+    logger.info("数据库初始化完成")
 
-def init_classification_standards():
-    """初始化分类标准数据"""
+def check_and_add_human_evaluation_columns():
+    """检查并添加人工评估相关字段"""
     try:
-        # 检查是否已有分类标准数据
-        existing_count = ClassificationStandard.query.count()
-        if existing_count > 0:
-            logger.info(f"数据库中已存在 {existing_count} 条分类标准，跳过初始化")
-            return
+        # 检查是否存在人工评估字段
+        result = db.session.execute(text("PRAGMA table_info(evaluation_history)"))
+        columns = [row[1] for row in result.fetchall()]
         
-        # 分类标准数据
-        classification_data = [
-            # 一级分类：选股
-            {
-                "level1": "选股",
-                "level2": "选股",
-                "level3": "概念板块选股",
-                "level1_definition": "根据特定条件筛选推荐股票的问题",
-                "level2_definition": "选股相关问题",
-                "level3_definition": "基于概念、主题、板块进行选股推荐"
-            },
+        human_columns = [
+            'human_total_score',
+            'human_dimensions_json',
+            'human_reasoning',
+            'human_evaluation_by',
+            'human_evaluation_time',
+            'is_human_modified'
+        ]
+        
+        missing_columns = [col for col in human_columns if col not in columns]
+        
+        if missing_columns:
+            logger.info(f"需要添加的人工评估字段: {missing_columns}")
             
-            # 一级分类：分析
-            {
-                "level1": "分析",
-                "level2": "宏观经济分析",
-                "level3": "政策解读",
-                "level1_definition": "对市场、经济、政策等进行深度分析的问题",
-                "level2_definition": "宏观经济层面的分析",
-                "level3_definition": "对经济政策、货币政策等的解读分析"
-            },
-            {
-                "level1": "分析",
-                "level2": "大盘行业分析",
-                "level3": "行业比较",
-                "level1_definition": "对市场、经济、政策等进行深度分析的问题",
-                "level2_definition": "大盘和行业层面的分析",
-                "level3_definition": "不同行业间的对比分析"
-            },
-            {
-                "level1": "分析",
-                "level2": "个股分析",
-                "level3": "基本面分析",
-                "level1_definition": "对市场、经济、政策等进行深度分析的问题",
-                "level2_definition": "针对个股的深度分析",
-                "level3_definition": "基于财务数据、业务模式等的基本面分析"
-            },
-            
-            # 一级分类：决策
-            {
-                "level1": "决策",
-                "level2": "个股决策",
-                "level3": "买卖时机",
-                "level1_definition": "涉及投资决策、操作建议的问题",
-                "level2_definition": "针对个股的投资决策",
-                "level3_definition": "关于个股买入、卖出时机的决策建议"
-            },
-            
-            # 一级分类：信息查询
-            {
-                "level1": "信息查询",
-                "level2": "信息查询",
-                "level3": "股票信息查询",
-                "level1_definition": "查询具体信息、数据、定义等的问题",
-                "level2_definition": "各类信息查询",
-                "level3_definition": "查询股票的基本信息、财务数据等"
+            # 添加缺失的字段
+            column_definitions = {
+                'human_total_score': 'REAL',
+                'human_dimensions_json': 'TEXT',
+                'human_reasoning': 'TEXT',
+                'human_evaluation_by': 'VARCHAR(100)',
+                'human_evaluation_time': 'DATETIME',
+                'is_human_modified': 'BOOLEAN DEFAULT 0'
             }
-        ]
-        
-        # 插入分类标准数据
-        for data in classification_data:
-            standard = ClassificationStandard(
-                level1=data['level1'],
-                level2=data['level2'],
-                level3=data['level3'],
-                level1_definition=data['level1_definition'],
-                level2_definition=data['level2_definition'],
-                level3_definition=data['level3_definition'],
-                is_default=True
-            )
-            db.session.add(standard)
-        
-        db.session.commit()
-        logger.info(f"成功初始化 {len(classification_data)} 条分类标准")
-        
+            
+            for column in missing_columns:
+                sql = f"ALTER TABLE evaluation_history ADD COLUMN {column} {column_definitions[column]}"
+                logger.info(f"执行SQL: {sql}")
+                db.session.execute(text(sql))
+            
+            db.session.commit()
+            logger.info("人工评估字段添加成功")
+        else:
+            logger.info("人工评估字段已存在，无需添加")
+            
     except Exception as e:
-        logger.error(f"初始化分类标准失败: {str(e)}")
+        logger.error(f"添加人工评估字段时发生错误: {str(e)}")
         db.session.rollback()
-
-def init_evaluation_standards():
-    """初始化评估标准数据"""
-    try:
-        # 检查是否已有评估标准数据
-        existing_count = EvaluationStandard.query.count()
-        if existing_count > 0:
-            logger.info(f"数据库中已存在 {existing_count} 条评估标准，跳过初始化")
-            return
-        
-        # 评估标准数据
-        evaluation_data = [
-            # 选股评估标准
-            {
-                "level2_category": "选股",
-                "dimension": "准确性",
-                "reference_standard": "返回股票完全符合筛选条件（如日期、资金流、涨跌幅等）",
-                "scoring_principle": "0-4分：完全符合=4分；部分符合=2分；完全不符=0分",
-                "max_score": 4,
-                "is_default": True
-            },
-            {
-                "level2_category": "选股",
-                "dimension": "完整性",
-                "reference_standard": "覆盖全部符合条件的股票（无遗漏），模糊推荐需提供推荐理由",
-                "scoring_principle": "0-3分：完整覆盖=3分；遗漏≤20%=2分；遗漏>20%=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "选股",
-                "dimension": "相关性",
-                "reference_standard": "不推荐ST/*ST股（除非明确要求），板块选股需严格匹配概念定义",
-                "scoring_principle": "0-3分：全部相关=3分；含1只无关=1分；≥2只无关=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "选股",
-                "dimension": "清晰度",
-                "reference_standard": "明确说明筛选逻辑（如'根据昨日涨停+今日下跌筛选'）",
-                "scoring_principle": "0-2分：清晰说明=2分；部分说明=1分；未说明=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            {
-                "level2_category": "选股",
-                "dimension": "合规性",
-                "reference_standard": "附带风险提示（如'股市有风险，决策需谨慎'）",
-                "scoring_principle": "0-2分：有提示=2分；无提示=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            
-            # 宏观经济分析评估标准
-            {
-                "level2_category": "宏观经济分析",
-                "dimension": "准确性",
-                "reference_standard": "数据来源为官方机构（如美联储、统计局），预测需标注依据",
-                "scoring_principle": "0-4分：数据准确+依据明确=4分；数据准确但依据模糊=2分；数据错误=0分",
-                "max_score": 4,
-                "is_default": True
-            },
-            {
-                "level2_category": "宏观经济分析",
-                "dimension": "相关性",
-                "reference_standard": "回答聚焦问题核心（如CPI超预期需分析趋势与动因）",
-                "scoring_principle": "0-3分：完全相关=3分；部分偏离=1分；无关=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "宏观经济分析",
-                "dimension": "完整性",
-                "reference_standard": "包含关键因素（如就业、通胀、政策），预测类需提供多情景分析",
-                "scoring_principle": "0-3分：覆盖所有因素=3分；遗漏1项=2分；遗漏≥2项=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "宏观经济分析",
-                "dimension": "清晰度",
-                "reference_standard": "复杂概念简化说明（如'核心CPI剔除能源价格波动'）",
-                "scoring_principle": "0-2分：通俗易懂=2分；部分晦涩=1分；难以理解=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            
-            # 大盘行业分析评估标准
-            {
-                "level2_category": "大盘行业分析",
-                "dimension": "准确性",
-                "reference_standard": "指数涨跌幅、行业数据与交易所一致",
-                "scoring_principle": "0-4分：数据完全正确=4分；小幅误差（±0.5%）=2分；重大错误=0分",
-                "max_score": 4,
-                "is_default": True
-            },
-            {
-                "level2_category": "大盘行业分析",
-                "dimension": "相关性",
-                "reference_standard": "回答需关联问题范围（如'牛市'需结合经济周期、成交量等）",
-                "scoring_principle": "0-3分：紧密关联=3分；部分关联=1分；无关=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "大盘行业分析",
-                "dimension": "可用性",
-                "reference_standard": "提供关键指标对比（如行业PE分位数、资金流入排名）",
-                "scoring_principle": "0-3分：提供≥3项指标=3分；1-2项=1分；无指标=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "大盘行业分析",
-                "dimension": "合规性",
-                "reference_standard": "避免绝对结论（如'必定进入牛市'）",
-                "scoring_principle": "0-2分：措辞谨慎=2分；存在绝对化表述=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            
-            # 个股分析评估标准
-            {
-                "level2_category": "个股分析",
-                "dimension": "准确性",
-                "reference_standard": "财务数据与财报一致，技术指标计算正确（如阻力位基于K线）",
-                "scoring_principle": "0-4分：全部正确=4分；1处错误=2分；≥2处错误=0分",
-                "max_score": 4,
-                "is_default": True
-            },
-            {
-                "level2_category": "个股分析",
-                "dimension": "完整性",
-                "reference_standard": "综合分析需覆盖≥2个维度（如基本面+资金面），归因分析需列≥2个原因",
-                "scoring_principle": "0-3分：覆盖多维度=3分；单一维度=1分；无分析=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "个股分析",
-                "dimension": "相关性",
-                "reference_standard": "异动归因需结合当日新闻或资金流向（如'大涨因政策利好+主力买入'）",
-                "scoring_principle": "0-3分：紧密关联事件=3分；部分关联=1分；无关=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "个股分析",
-                "dimension": "清晰度",
-                "reference_standard": "术语标准化（如'ROE=净利润/净资产'），避免模糊表述",
-                "scoring_principle": "0-2分：清晰无歧义=2分；部分模糊=1分；难以理解=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            
-            # 个股决策评估标准
-            {
-                "level2_category": "个股决策",
-                "dimension": "合规性",
-                "reference_standard": "严禁直接建议操作（如'应买入'），改用'可关注''需谨慎'",
-                "scoring_principle": "0-4分：完全合规=4分；1处违规=0分（一票否决）",
-                "max_score": 4,
-                "is_default": True
-            },
-            {
-                "level2_category": "个股决策",
-                "dimension": "可用性",
-                "reference_standard": "提供决策依据（如'估值低于行业30%+资金流入'），对比标的需列关键指标",
-                "scoring_principle": "0-3分：依据充分=3分；部分依据=1分；无依据=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "个股决策",
-                "dimension": "完整性",
-                "reference_standard": "股价预测需标注概率区间（如'70%概率在20-25元'），操作建议需提示风险",
-                "scoring_principle": "0-3分：含概率/风险提示=3分；缺1项=1分；全缺=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "个股决策",
-                "dimension": "清晰度",
-                "reference_standard": "明确区分客观数据与主观判断（如'据财报数据...但市场情绪可能波动'）",
-                "scoring_principle": "0-2分：明确区分=2分；混合表述=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            
-            # 信息查询评估标准
-            {
-                "level2_category": "信息查询",
-                "dimension": "准确性",
-                "reference_standard": "百科定义符合权威解释，个股信息与公告一致（如股权登记日）",
-                "scoring_principle": "0-4分：完全正确=4分；部分正确=2分；错误=0分",
-                "max_score": 4,
-                "is_default": True
-            },
-            {
-                "level2_category": "信息查询",
-                "dimension": "时效性",
-                "reference_standard": "实时信息更新及时（如'今日股东大会'需当日回答）",
-                "scoring_principle": "0-3分：实时更新=3分；延迟≤1小时=2分；延迟>1小时=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "信息查询",
-                "dimension": "相关性",
-                "reference_standard": "直接回答问题，无冗余信息（如'XX公司上市时间：2025年Q1'）",
-                "scoring_principle": "0-3分：精准回答=3分；含部分无关内容=1分；未回答=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "信息查询",
-                "dimension": "可用性",
-                "reference_standard": "操作指引需分步骤（如'绑定银行卡：1.登录APP→2.点击...'）",
-                "scoring_principle": "0-2分：步骤清晰=2分；描述混乱=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-            
-            # 无效问题评估标准
-            {
-                "level2_category": "无效问题",
-                "dimension": "相关性",
-                "reference_standard": "识别无效问题（如辱骂、无关内容），不生成投资相关内容",
-                "scoring_principle": "0-3分：正确识别且不回答=3分；错误回答=0分",
-                "max_score": 3,
-                "is_default": True
-            },
-            {
-                "level2_category": "无效问题",
-                "dimension": "可用性",
-                "reference_standard": "提供引导话术（如'请提问投资相关问题'）",
-                "scoring_principle": "0-2分：有效引导=2分；无引导=0分",
-                "max_score": 2,
-                "is_default": True
-            },
-        ]
-        
-        # 插入评估标准数据
-        for data in evaluation_data:
-            standard = EvaluationStandard(
-                level2_category=data['level2_category'],
-                dimension=data['dimension'],
-                reference_standard=data['reference_standard'],
-                scoring_principle=data['scoring_principle'],
-                max_score=data['max_score'],
-                is_default=data['is_default']
-            )
-            db.session.add(standard)
-        
-        db.session.commit()
-        logger.info(f"成功初始化 {len(evaluation_data)} 条评估标准")
-        
-    except Exception as e:
-        logger.error(f"初始化评估标准失败: {str(e)}")
-        db.session.rollback()
+        raise
 
 def clear_database():
     """清空数据库（谨慎使用）"""
@@ -427,27 +233,15 @@ def clear_database():
 
 def main():
     """主函数"""
-    # 创建临时Flask应用用于数据库操作
-    app = Flask(__name__)
-    app.config.from_object(Config)
+    app = create_app()
     
     with app.app_context():
-        # 初始化数据库
-        db.init_app(app)
-        
-        # 创建表
-        if not create_tables():
-            logger.error("创建数据库表失败")
-            return False
-        
-        # 初始化数据
-        if not init_database():
-            logger.error("初始化数据库数据失败")
-            return False
-        
-        logger.info("数据库初始化完成！")
-        return True
+        try:
+            init_database()
+            logger.info("数据库初始化成功完成")
+        except Exception as e:
+            logger.error(f"数据库初始化失败: {str(e)}")
+            sys.exit(1)
 
 if __name__ == '__main__':
-    success = main()
-    sys.exit(0 if success else 1) 
+    main() 

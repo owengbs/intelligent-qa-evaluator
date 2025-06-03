@@ -227,7 +227,7 @@ class EvaluationHistoryService:
             db.session.delete(history)
             db.session.commit()
             
-            self.logger.info(f"成功删除评估记录，ID: {history_id}")
+            self.logger.info(f"成功删除评估历史记录，ID: {history_id}")
             
             return {
                 'success': True,
@@ -240,6 +240,70 @@ class EvaluationHistoryService:
             return {
                 'success': False,
                 'message': f'删除评估记录失败: {str(e)}'
+            }
+    
+    def update_human_evaluation(self, history_id, human_data, evaluator_name='匿名用户'):
+        """
+        更新人工评估结果
+        
+        Args:
+            history_id: 评估历史ID
+            human_data: 人工评估数据
+            evaluator_name: 评估者姓名
+            
+        Returns:
+            dict: 更新结果
+        """
+        try:
+            history = EvaluationHistory.query.get(history_id)
+            
+            if not history:
+                return {
+                    'success': False,
+                    'message': '评估记录不存在'
+                }
+            
+            # 更新人工评估字段
+            if 'human_total_score' in human_data:
+                history.human_total_score = human_data['human_total_score']
+            
+            if 'human_dimensions' in human_data and human_data['human_dimensions']:
+                history.human_dimensions_json = json.dumps(human_data['human_dimensions'], ensure_ascii=False)
+            
+            if 'human_reasoning' in human_data:
+                history.human_reasoning = human_data['human_reasoning']
+            
+            # 设置评估者和时间
+            history.human_evaluation_by = evaluator_name
+            history.human_evaluation_time = datetime.utcnow()
+            history.is_human_modified = True
+            
+            # 更新updated_at字段
+            history.updated_at = datetime.utcnow()
+            
+            db.session.commit()
+            
+            self.logger.info(f"成功更新人工评估，记录ID: {history_id}, 评估者: {evaluator_name}")
+            
+            return {
+                'success': True,
+                'message': '人工评估更新成功',
+                'data': history.to_dict()
+            }
+            
+        except SQLAlchemyError as e:
+            self.logger.error(f"更新人工评估失败: {str(e)}")
+            db.session.rollback()
+            return {
+                'success': False,
+                'message': f'更新人工评估失败: {str(e)}'
+            }
+        except Exception as e:
+            self.logger.error(f"更新人工评估时发生错误: {str(e)}")
+            db.session.rollback()
+            return {
+                'success': False,
+                'message': f'更新人工评估时发生错误: {str(e)}'
             }
     
     def get_evaluation_statistics(self):

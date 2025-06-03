@@ -191,6 +191,15 @@ class EvaluationHistory(db.Model):
     evaluation_time_seconds = db.Column(db.Float, comment='评估耗时(秒)')
     model_used = db.Column(db.String(100), comment='使用的模型')
     raw_response = db.Column(db.Text, comment='原始LLM响应')
+    
+    # 人工评估相关字段
+    human_total_score = db.Column(db.Float, comment='人工修改后的总分')
+    human_dimensions_json = db.Column(db.Text, comment='人工修改后的各维度分数(JSON格式)')
+    human_reasoning = db.Column(db.Text, comment='人工评估意见')
+    human_evaluation_by = db.Column(db.String(100), comment='人工评估者')
+    human_evaluation_time = db.Column(db.DateTime, comment='人工评估时间')
+    is_human_modified = db.Column(db.Boolean, default=False, comment='是否经过人工修改')
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
     
@@ -202,6 +211,13 @@ class EvaluationHistory(db.Model):
                 dimensions = json.loads(self.dimensions_json)
             except (json.JSONDecodeError, TypeError):
                 dimensions = {}
+        
+        human_dimensions = {}
+        if self.human_dimensions_json:
+            try:
+                human_dimensions = json.loads(self.human_dimensions_json)
+            except (json.JSONDecodeError, TypeError):
+                human_dimensions = {}
         
         return {
             'id': self.id,
@@ -219,6 +235,15 @@ class EvaluationHistory(db.Model):
             'evaluation_time_seconds': self.evaluation_time_seconds,
             'model_used': self.model_used,
             'raw_response': self.raw_response,
+            
+            # 人工评估字段
+            'human_total_score': self.human_total_score,
+            'human_dimensions': human_dimensions,
+            'human_reasoning': self.human_reasoning,
+            'human_evaluation_by': self.human_evaluation_by,
+            'human_evaluation_time': self.human_evaluation_time.isoformat() if self.human_evaluation_time else None,
+            'is_human_modified': self.is_human_modified,
+            
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -230,6 +255,11 @@ class EvaluationHistory(db.Model):
         dimensions_json = None
         if 'dimensions' in data and data['dimensions']:
             dimensions_json = json.dumps(data['dimensions'], ensure_ascii=False)
+        
+        # 处理human_dimensions数据
+        human_dimensions_json = None
+        if 'human_dimensions' in data and data['human_dimensions']:
+            human_dimensions_json = json.dumps(data['human_dimensions'], ensure_ascii=False)
         
         # 处理question_time
         question_time = None
@@ -245,6 +275,20 @@ class EvaluationHistory(db.Model):
             elif isinstance(data['question_time'], datetime):
                 question_time = data['question_time']
         
+        # 处理human_evaluation_time
+        human_evaluation_time = None
+        if 'human_evaluation_time' in data and data['human_evaluation_time']:
+            if isinstance(data['human_evaluation_time'], str):
+                try:
+                    human_evaluation_time = datetime.fromisoformat(data['human_evaluation_time'].replace('Z', '+00:00'))
+                except ValueError:
+                    try:
+                        human_evaluation_time = datetime.strptime(data['human_evaluation_time'], '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        human_evaluation_time = None
+            elif isinstance(data['human_evaluation_time'], datetime):
+                human_evaluation_time = data['human_evaluation_time']
+        
         return cls(
             user_input=data.get('user_input'),
             model_answer=data.get('model_answer'),
@@ -259,7 +303,15 @@ class EvaluationHistory(db.Model):
             classification_level3=data.get('classification_level3'),
             evaluation_time_seconds=data.get('evaluation_time_seconds'),
             model_used=data.get('model_used'),
-            raw_response=data.get('raw_response')
+            raw_response=data.get('raw_response'),
+            
+            # 人工评估字段
+            human_total_score=data.get('human_total_score'),
+            human_dimensions_json=human_dimensions_json,
+            human_reasoning=data.get('human_reasoning'),
+            human_evaluation_by=data.get('human_evaluation_by'),
+            human_evaluation_time=human_evaluation_time,
+            is_human_modified=data.get('is_human_modified', False)
         )
     
     def __repr__(self):
