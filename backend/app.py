@@ -463,6 +463,26 @@ def get_evaluation_history():
         logger.error(f"获取评估历史失败: {str(e)}")
         return jsonify({'error': f'获取评估历史失败: {str(e)}'}), 500
 
+@app.route('/api/evaluation-history', methods=['POST'])
+def create_evaluation_history():
+    """保存评估历史记录"""
+    try:
+        logger.info("保存评估历史记录")
+        
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': '缺少评估数据'}), 400
+        
+        # 调用服务保存记录
+        result = evaluation_history_service.save_evaluation_result(data)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"保存评估历史失败: {str(e)}")
+        return jsonify({'error': f'保存评估历史失败: {str(e)}'}), 500
+
 @app.route('/api/evaluation-history/<int:history_id>', methods=['GET'])
 def get_evaluation_by_id(history_id):
     """根据ID获取单个评估记录"""
