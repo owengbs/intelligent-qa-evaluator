@@ -12,8 +12,14 @@ class Config:
     """基础配置类"""
     # 数据库配置
     DATABASE_PATH = 'database/qa_evaluation.db'
-    SQLALCHEMY_DATABASE_URI = f'sqlite:///{DATABASE_PATH}'
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    def __post_init__(self):
+        """数据类初始化后设置数据库URI"""
+        # 使用绝对路径确保数据库文件可以正确创建和访问
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(base_dir, self.DATABASE_PATH)
+        self.SQLALCHEMY_DATABASE_URI = f'sqlite:///{db_path}'
+        self.SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # 日志配置
     LOG_LEVEL = 'INFO'
