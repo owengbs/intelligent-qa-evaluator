@@ -1,0 +1,70 @@
+
+# 后端重复检测机制补丁
+# 文件位置: backend/services/evaluation_history_service.py
+
+# 在 save_evaluation_result 方法开始处添加重复检测
+def save_evaluation_result(self, evaluation_data, classification_result=None):
+    """
+    保存评估结果到历史记录（带重复检测）
+    """
+    try:
+        # 重复检测：检查是否已存在相同的问题和答案
+        user_input = evaluation_data.get('user_input')
+        model_answer = evaluation_data.get('model_answer')
+        
+        if user_input and model_answer:
+            # 查找最近5分钟内的相同记录
+            five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+            existing_record = EvaluationHistory.query.filter(
+                EvaluationHistory.user_input == user_input,
+                EvaluationHistory.model_answer == model_answer,
+                EvaluationHistory.created_at >= five_minutes_ago
+            ).first()
+            
+            if existing_record:
+                self.logger.warning(f"检测到重复记录，返回现有记录ID: {existing_record.id}")
+                return {
+                    'success': True,
+                    'message': '评估历史已存在（防重复）',
+                    'history_id': existing_record.id,
+                    'data': existing_record.to_dict(),
+                    'is_duplicate': True
+                }
+        
+        # 原有的保存逻辑...
+        # [保持现有代码不变]
+        
+    except SQLAlchemyError as e:
+        # 错误处理逻辑...
+
+
+
+# 文件位置: backend/app.py
+# 在 create_evaluation_history 路由中添加重复检测
+
+@app.route('/api/evaluation-history', methods=['POST'])
+def create_evaluation_history():
+    """创建评估历史记录（带防重复机制）"""
+    try:
+        logger.info("收到创建评估历史请求")
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': '缺少评估数据'}), 400
+        
+        # 添加请求指纹检测
+        request_fingerprint = f"{data.get('user_input', '')}|{data.get('model_answer', '')}|{data.get('total_score', 0)}"
+        
+        # 检查Redis缓存中是否有相同请求（如果使用Redis）
+        # 或者检查数据库中最近的记录
+        
+        result = evaluation_history_service.save_evaluation_result(data)
+        
+        if result.get('is_duplicate'):
+            logger.info(f"防重复检测：返回现有记录 {result.get('history_id')}")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"创建评估历史失败: {str(e)}")
+        return jsonify({'error': f'创建评估历史失败: {str(e)}'}), 500

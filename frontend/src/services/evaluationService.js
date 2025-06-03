@@ -93,7 +93,38 @@ class EvaluationService {
   // 保存评估结果到历史记录
   async saveEvaluationHistory(historyData) {
     try {
+      // ====== 新增：重复检测 ======
+      console.log('保存评估历史前检查重复...', historyData);
+      
+      // 检查是否是重复保存请求
+      const currentTime = Date.now();
+      const requestKey = `${historyData.user_input}|||${historyData.model_answer}`;
+      
+      // 使用内存缓存防止短时间内重复请求
+      if (!this._recentSaves) {
+        this._recentSaves = new Map();
+      }
+      
+      const lastSaveTime = this._recentSaves.get(requestKey);
+      if (lastSaveTime && (currentTime - lastSaveTime) < 30000) { // 30秒内
+        console.log('检测到30秒内重复保存请求，跳过');
+        return { success: true, message: '跳过重复保存', is_duplicate: true };
+      }
+      
+      // 记录本次保存时间
+      this._recentSaves.set(requestKey, currentTime);
+      
+      // 清理过期的缓存（保留最近5分钟）
+      const fiveMinutesAgo = currentTime - 300000;
+      for (const [key, time] of this._recentSaves.entries()) {
+        if (time < fiveMinutesAgo) {
+          this._recentSaves.delete(key);
+        }
+      }
+      // ====== 重复检测结束 ======
+      
       const response = await this.api.post('/evaluation-history', historyData);
+      console.log('评估历史保存成功');
       return response.data;
     } catch (error) {
       console.error('保存评估历史失败:', error);

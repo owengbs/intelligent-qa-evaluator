@@ -1,0 +1,14 @@
+# 生产环境配置 (.env.production)
+REACT_APP_API_URL=http://9.135.87.101:7860/api
+REACT_APP_ENV=production
+
+# 生产服务器配置
+PORT=8701
+HOST=9.135.87.101
+
+# 生产环境特定配置
+GENERATE_SOURCEMAP=false
+FAST_REFRESH=false
+
+# 性能优化
+INLINE_RUNTIME_CHUNK=false 

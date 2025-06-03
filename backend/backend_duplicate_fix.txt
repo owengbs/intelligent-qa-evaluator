@@ -1,0 +1,70 @@
+
+# 后端修复：在evaluation_history_service.py的save_evaluation_result方法开头添加重复检测
+
+def save_evaluation_result(self, evaluation_data, classification_result=None):
+    """
+    保存评估结果到历史记录（带重复检测）
+    """
+    try:
+        # ====== 新增：重复记录检测 ======
+        user_input = evaluation_data.get('user_input')
+        model_answer = evaluation_data.get('model_answer')
+        
+        if user_input and model_answer:
+            # 检查最近5分钟内是否有相同内容的记录
+            five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+            existing_record = EvaluationHistory.query.filter(
+                EvaluationHistory.user_input == user_input,
+                EvaluationHistory.model_answer == model_answer,
+                EvaluationHistory.created_at >= five_minutes_ago
+            ).first()
+            
+            if existing_record:
+                self.logger.warning(f"检测到重复记录，返回现有记录ID: {existing_record.id}")
+                return {
+                    'success': True,
+                    'message': '检测到重复记录，返回现有记录',
+                    'history_id': existing_record.id,
+                    'data': existing_record.to_dict(),
+                    'is_duplicate': True
+                }
+        # ====== 重复检测结束 ======
+        
+        # 继续原有的保存逻辑...
+        history = EvaluationHistory(
+            user_input=evaluation_data.get('user_input'),
+            model_answer=evaluation_data.get('model_answer'),
+            reference_answer=evaluation_data.get('reference_answer'),
+            question_time=evaluation_data.get('question_time'),
+            evaluation_criteria=evaluation_data.get('evaluation_criteria') or evaluation_data.get('evaluation_criteria_used'),
+            total_score=evaluation_data.get('total_score') or evaluation_data.get('score', 0.0),
+            dimensions_json=json.dumps(evaluation_data.get('dimensions', {}), ensure_ascii=False),
+            reasoning=evaluation_data.get('reasoning'),
+            classification_level1=classification_result.get('level1') if classification_result else None,
+            classification_level2=classification_result.get('level2') if classification_result else None,
+            classification_level3=classification_result.get('level3') if classification_result else None,
+            evaluation_time_seconds=evaluation_data.get('evaluation_time_seconds', 0),
+            model_used=evaluation_data.get('model_used', 'unknown'),
+            raw_response=evaluation_data.get('raw_response'),
+            created_at=datetime.utcnow()
+        )
+        
+        db.session.add(history)
+        db.session.commit()
+        
+        self.logger.info(f"成功保存评估历史记录，ID: {history.id}")
+        
+        return {
+            'success': True,
+            'message': '评估历史保存成功',
+            'history_id': history.id,
+            'data': history.to_dict()
+        }
+        
+    except SQLAlchemyError as e:
+        self.logger.error(f"保存评估历史失败: {str(e)}")
+        db.session.rollback()
+        return {
+            'success': False,
+            'message': f'保存评估历史失败: {str(e)}'
+        }

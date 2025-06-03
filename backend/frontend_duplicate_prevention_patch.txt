@@ -1,0 +1,93 @@
+
+// 前端防重复提交机制补丁
+// 文件位置: frontend/src/components/EvaluationForm.js
+
+// 1. 在组件状态中添加提交状态跟踪
+const [humanEvaluationSubmitting, setHumanEvaluationSubmitting] = useState(false);
+const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
+
+// 2. 修改 handleHumanEvaluationSubmit 方法
+const handleHumanEvaluationSubmit = async () => {
+  // 防重复提交检查
+  const now = Date.now();
+  if (humanEvaluationSubmitting) {
+    message.warning('正在提交中，请勿重复点击');
+    return;
+  }
+  
+  if (now - lastSubmissionTime < 3000) { // 3秒内不允许重复提交
+    message.warning('提交过于频繁，请稍后再试');
+    return;
+  }
+  
+  try {
+    setHumanEvaluationSubmitting(true);
+    setLastSubmissionTime(now);
+    setHumanEvaluationLoading(true);
+    
+    const values = await humanForm.validateFields();
+    
+    // 构建人工评估数据
+    const humanData = {
+      human_total_score: values.human_total_score,
+      human_reasoning: values.human_reasoning,
+      evaluator_name: values.evaluator_name || '评估专家'
+    };
+    
+    // 收集各维度分数
+    const humanDimensions = {};
+    Object.keys(values).forEach(key => {
+      if (key.startsWith('dimension_')) {
+        const dimensionKey = key.replace('dimension_', '');
+        humanDimensions[dimensionKey] = values[key];
+      }
+    });
+    
+    if (Object.keys(humanDimensions).length > 0) {
+      humanData.human_dimensions = humanDimensions;
+    }
+    
+    // 调用API更新人工评估 - 只调用一次，使用PUT方法
+    console.log('提交人工评估数据:', humanData);
+    const response = await api.put(`/api/evaluation-history/${currentHistoryId}/human-evaluation`, humanData);
+    
+    if (response.data.success) {
+      message.success('人工评估保存成功');
+      setHumanEvaluationVisible(false);
+      
+      // 更新当前显示的结果
+      setResult(prevResult => ({
+        ...prevResult,
+        human_total_score: humanData.human_total_score,
+        human_reasoning: humanData.human_reasoning,
+        is_human_modified: true
+      }));
+    } else {
+      message.error(response.data.message || '人工评估保存失败');
+    }
+    
+  } catch (error) {
+    console.error('人工评估提交失败:', error);
+    message.error('人工评估提交失败，请重试');
+  } finally {
+    setHumanEvaluationLoading(false);
+    setHumanEvaluationSubmitting(false);
+  }
+};
+
+// 3. 修改提交按钮，添加禁用状态
+// 在 renderHumanEvaluationModal 中的 Modal 配置
+<Modal
+  title={...}
+  open={humanEvaluationVisible}
+  onCancel={() => setHumanEvaluationVisible(false)}
+  onOk={handleHumanEvaluationSubmit}
+  okText="保存评估"
+  cancelText="取消"
+  width={800}
+  confirmLoading={humanEvaluationLoading}
+  okButtonProps={{
+    disabled: humanEvaluationSubmitting, // 添加禁用状态
+    loading: humanEvaluationLoading
+  }}
+>

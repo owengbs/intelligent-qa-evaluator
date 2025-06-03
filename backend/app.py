@@ -578,5 +578,13 @@ def internal_error(error):
     return jsonify({'error': '服务器内部错误'}), 500
 
 if __name__ == '__main__':
-    logger.info("启动问答评估服务...")
-    app.run(host='0.0.0.0', port=5001, debug=True) 
+    from config import config, print_config_info
+    
+    print_config_info()
+    logger.info(f"启动问答评估服务 - {config.ENVIRONMENT}环境...")
+    
+    app.run(
+        host=config.HOST, 
+        port=config.PORT, 
+        debug=config.DEBUG
+    ) 

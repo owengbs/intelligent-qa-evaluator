@@ -68,6 +68,10 @@ const EvaluationForm = () => {
   // Redux状态
   const { isLoading, result, error, history } = useSelector((state) => state.evaluation);
 
+  // 添加防重复提交状态跟踪
+  const [humanEvaluationSubmitting, setHumanEvaluationSubmitting] = useState(false);
+  const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
+
   // 动态生成评分prompt - 根据评估标准自动生成维度评分要求
   const generateScoringPrompt = (evaluationCriteria) => {
     // 解析评估标准，提取维度信息
@@ -239,8 +243,23 @@ ${dimensionRequirements}
   };
 
   const handleHumanEvaluationSubmit = async () => {
+    // 防重复提交检查
+    const now = Date.now();
+    if (humanEvaluationSubmitting) {
+      message.warning('正在提交中，请勿重复点击');
+      return;
+    }
+    
+    if (now - lastSubmissionTime < 3000) { // 3秒内不允许重复提交
+      message.warning('提交过于频繁，请稍后再试');
+      return;
+    }
+    
     try {
+      setHumanEvaluationSubmitting(true);
+      setLastSubmissionTime(now);
       setHumanEvaluationLoading(true);
+      
       const values = await humanForm.validateFields();
       
       // 构建人工评估数据
@@ -263,15 +282,17 @@ ${dimensionRequirements}
         humanData.human_dimensions = humanDimensions;
       }
       
-      // 调用API更新人工评估
+      // 调用API更新人工评估 - 只调用一次，使用PUT方法
+      console.log('提交人工评估数据:', humanData);
       const response = await api.put(`/api/evaluation-history/${currentHistoryId}/human-evaluation`, humanData);
       
       if (response.data.success) {
         message.success('人工评估保存成功');
         setHumanEvaluationVisible(false);
         
-        // 更新当前显示的结果（如果需要）
-        // 这里可以选择重新获取评估结果或者直接更新当前结果
+        // 人工评估成功后，数据已保存到数据库
+        // 用户可以重新评估查看更新后的结果
+        
       } else {
         message.error(response.data.message || '人工评估保存失败');
       }
@@ -281,6 +302,7 @@ ${dimensionRequirements}
       message.error('人工评估提交失败，请重试');
     } finally {
       setHumanEvaluationLoading(false);
+      setHumanEvaluationSubmitting(false);
     }
   };
 
@@ -302,6 +324,10 @@ ${dimensionRequirements}
         cancelText="取消"
         width={800}
         confirmLoading={humanEvaluationLoading}
+        okButtonProps={{
+          disabled: humanEvaluationSubmitting, // 添加禁用状态防止重复点击
+          loading: humanEvaluationLoading
+        }}
       >
         <div style={{ marginBottom: 16 }}>
           <Alert

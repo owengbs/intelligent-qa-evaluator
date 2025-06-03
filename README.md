@@ -1,10 +1,37 @@
-# 问AI评估系统 v2.3.1
+# 问AI评估系统 v2.3.2
 
-智能问答评估系统，基于大语言模型的自动化评估平台，支持多维度评分、智能分类识别、历史记录管理、统计分析、人工评估修正和配置数据全量同步。
+智能问答评估系统，基于大语言模型的自动化评估平台，支持多维度评分、智能分类识别、历史记录管理、统计分析、人工评估修正、配置数据全量同步和多环境部署。
 
-## 🚀 最新功能特性 (v2.3.1)
+## 🚀 最新功能特性 (v2.3.2)
 
-### 🔄 配置数据全量同步系统 ⭐ 新增
+### 🌍 多环境配置系统 ⭐ 新增
+- **本地 vs 生产环境**：智能环境切换，支持本地开发和生产部署
+- **自动化启动脚本**：一键启动本地开发环境或生产环境
+- **端口自动配置**：本地(5001/3000) vs 生产(7860/8701)端口配置
+- **IP地址智能切换**：本地localhost vs 生产9.135.87.101自动配置
+- **环境状态验证**：内置配置验证工具，确保环境配置正确
+
+### 🔒 重复记录完全防护 ⭐ 修复
+- **后端防重复机制**：5分钟内相同用户输入+模型答案组合检测
+- **前端防重复拦截**：30秒内存缓存，防止快速重复请求
+- **历史重复清理**：已清理现有重复记录，确保数据完整性
+- **实时监控工具**：提供重复记录监控和统计功能
+
+### 🚀 环境部署优化
+- **一键启动脚本**：本地/生产环境自动化启动
+- **配置文件管理**：环境配置模板自动复制和切换
+- **前端环境自动化**：自动配置REACT_APP_API_URL等环境变量
+- **部署文档完善**：详细的环境配置和快速部署指南
+
+### 📊 解决的核心问题
+- ❌ **环境配置混乱**：本地开发和生产环境端口和IP配置不统一
+- ❌ **重复记录问题**：AI评估和人工评估可能创建重复历史记录
+- ❌ **部署复杂性**：环境切换需要手动修改多个配置文件
+- ✅ **智能环境切换**：通过APP_ENV环境变量自动配置
+- ✅ **重复记录彻底解决**：前后端双重防护机制
+- ✅ **一键部署**：自动化启动脚本简化部署流程
+
+### 🔄 配置数据全量同步系统 (v2.3.1 保持)
 - **全量导出导入**：支持完整的配置数据导出和全量替换导入
 - **团队协作支持**：解决多人协作时配置数据不一致的问题
 - **远端部署优化**：提供快速数据库初始化和部署检查工具
@@ -12,19 +39,21 @@
 - **版本控制集成**：配置数据通过JSON文件进行版本控制
 
 ### 🛠️ 新增工具和脚本
+
+#### 环境配置工具 ⭐ v2.3.2
+- **🌍 环境配置中心**：`backend/config.py` - 统一配置管理
+- **🚀 本地启动脚本**：`backend/start_local.sh` - 本地环境一键启动
+- **🌐 生产启动脚本**：`backend/start_production.sh` - 生产环境一键启动
+- **🖥️ 前端本地启动**：`backend/start_frontend_local.sh` - 本地前端启动
+- **⚡ 前端生产启动**：`backend/start_frontend_production.sh` - 生产前端启动
+- **📋 环境配置指南**：`backend/ENVIRONMENT_SETUP_GUIDE.md`
+- **🚀 快速部署指南**：`backend/QUICK_DEPLOYMENT_GUIDE.md`
+
+#### 配置同步工具 (保持v2.3.1)
 - **📤 全量配置导出**：`backend/scripts/export_config_data.py`
 - **📥 全量/增量导入**：`backend/scripts/import_config_data.py --full-replace`
 - **🚀 快速数据库初始化**：`backend/quick_init.py`
 - **🔍 部署状态检查**：`backend/check_deployment.py`
-- **📋 完整部署指南**：`DEPLOYMENT_GUIDE.md`
-
-### 📊 解决的核心问题
-- ❌ **增量导入问题**：原有只能新增配置，无法删除或修改已有配置
-- ❌ **团队不一致**：不同环境的配置数据可能不同步
-- ❌ **远端数据库为空**：新部署环境缺少基础配置数据
-- ✅ **全量同步**：完全替换现有配置，确保团队配置一致
-- ✅ **智能初始化**：自动检测并初始化数据库
-- ✅ **部署检查**：验证环境配置正确性
 
 ### 1. 人工评估系统 👨‍💼
 - **AI+人工双重评估**：在AI评估基础上支持专家人工修正和补充
@@ -145,6 +174,24 @@ python app.py
 
 ## 🛠️ 技术架构
 
+### 环境配置架构 ⭐ v2.3.2
+```
+config.py
+├── LocalConfig (本地开发)
+│   ├── HOST: 0.0.0.0
+│   ├── PORT: 5001 (后端)
+│   ├── FRONTEND_PORT: 3000
+│   ├── API_BASE_URL: http://localhost:5001/api
+│   └── DEBUG: True
+├── ProductionConfig (生产环境)
+│   ├── HOST: 0.0.0.0
+│   ├── PORT: 7860 (后端)
+│   ├── FRONTEND_PORT: 8701
+│   ├── API_BASE_URL: http://9.135.87.101:7860/api
+│   └── DEBUG: False
+└── get_config() - 自动选择配置
+```
+
 ### 前端技术栈
 - **React 18**：现代化的前端框架
 - **Redux Toolkit**：状态管理
@@ -164,50 +211,110 @@ python app.py
 - **classification_standards**：分类标准表
 - **evaluation_standards**：评估标准表
 
-#### 人工评估字段扩展
-```sql
--- 新增字段
-human_total_score INTEGER,           -- 人工评估总分
-human_dimensions_json TEXT,          -- 人工评估各维度分数
-human_reasoning TEXT,                -- 人工评估理由
-human_evaluation_by TEXT,            -- 评估者姓名
-human_evaluation_time TIMESTAMP,     -- 人工评估时间
-is_human_modified BOOLEAN DEFAULT FALSE  -- 是否已人工修正
+#### 重复记录防护机制 ⭐ v2.3.2
+```python
+# 后端防重复检测
+def check_duplicate_within_timeframe(user_input, model_answer, minutes=5):
+    """检测指定时间内是否存在相同内容的评估记录"""
+    
+# 前端防重复缓存
+const duplicateCache = new Map(); // 30秒内存缓存
 ```
 
 ## 📦 安装和运行
 
-### 环境要求
+### 🌍 环境配置 ⭐ 新增
+
+#### 本地开发环境
+```bash
+# 一键启动后端 (端口: 5001)
+cd backend
+bash start_local.sh
+
+# 一键启动前端 (端口: 3000) - 新终端窗口
+bash start_frontend_local.sh
+
+# 访问地址
+# 前端: http://localhost:3000
+# 后端API: http://localhost:5001/api
+```
+
+#### 生产环境
+```bash
+# 一键启动后端 (端口: 7860)
+cd backend
+bash start_production.sh
+
+# 一键启动前端 (端口: 8701) - 新终端窗口
+bash start_frontend_production.sh
+
+# 访问地址
+# 前端: http://9.135.87.101:8701
+# 后端API: http://9.135.87.101:7860/api
+```
+
+#### 环境验证
+```bash
+# 检查当前环境配置
+cd backend
+python config.py
+
+# 输出示例：
+# 🌍 运行环境: local
+# 🏠 服务器地址: 0.0.0.0:5001
+# 🌐 API地址: http://localhost:5001/api
+# 🖥️ 前端地址: localhost:3000
+# 🔧 调试模式: True
+```
+
+### 传统安装方式
+
+#### 环境要求
 - Python 3.8+
 - Node.js 16+
 - npm 或 yarn
 
-### 后端安装
+#### 手动安装
 ```bash
+# 后端安装
 cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 # 运行数据库迁移（添加人工评估字段）
 python init_db.py
-python app.py
-```
 
-### 前端安装
-```bash
+# 前端安装
 cd frontend
 npm install
-npm start
 ```
 
-### 环境配置
+#### 环境变量配置
 创建 `backend/.env` 文件：
 ```env
 DEEPSEEK_API_KEY=your_deepseek_api_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+APP_ENV=local  # 或 production
 ```
 
+前端环境配置自动生成：
+- 本地环境：`.env.local`
+- 生产环境：`.env.production`
+
 ## 🎯 使用指南
+
+### 0. 环境切换 ⭐ 新增
+```bash
+# 切换到本地开发环境
+export APP_ENV=local
+
+# 切换到生产环境
+export APP_ENV=production
+
+# 使用启动脚本（推荐）
+bash start_local.sh      # 自动配置本地环境
+bash start_production.sh # 自动配置生产环境
+```
 
 ### 1. 评估中心（AI评估）
 - 输入用户问题、模型回答和参考答案
@@ -242,55 +349,33 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 ## 📊 数据流程
 
-### 人工评估流程（新增）
-1. **AI基础评估**：系统首先完成AI评估
-2. **人工复审触发**：专家点击"人工评估"按钮
-3. **评分调整**：基于专业判断调整AI评分
-4. **理由记录**：输入详细的修正理由
-5. **数据保存**：保存人工评估结果，标记为已修正
-6. **对比展示**：系统展示AI vs 人工评估对比
+### 重复记录防护流程 ⭐ v2.3.2
+1. **前端请求拦截**：检查30秒内存缓存，防止快速重复提交
+2. **后端重复检测**：检查5分钟内相同user_input+model_answer组合
+3. **自动跳过保存**：发现重复直接返回成功，避免数据冗余
+4. **监控统计**：实时监控重复记录情况，确保数据质量
 
-### 评估数据结构
-```json
-{
-  "ai_evaluation": {
-    "total_score": 7.5,
-    "dimensions": {"准确性": 3, "完整性": 2, "流畅性": 2.5},
-    "reasoning": "AI评估理由..."
-  },
-  "human_evaluation": {
-    "total_score": 8.0,
-    "dimensions": {"准确性": 4, "完整性": 2, "流畅性": 2.0},
-    "reasoning": "基于行业经验，准确性表现更好，但流畅性有待改进...",
-    "evaluator": "张专家",
-    "evaluation_time": "2025-06-03 10:30:00"
-  }
-}
-```
-
-## 🔧 配置说明
-
-### API接口更新
-```bash
-# 新增人工评估接口
-PUT /api/evaluation-history/{history_id}/human-evaluation
-Content-Type: application/json
-
-{
-  "human_total_score": 8.0,
-  "human_dimensions": {"准确性": 4, "完整性": 2, "流畅性": 2.0},
-  "human_reasoning": "专家评估意见...",
-  "human_evaluation_by": "评估者姓名"
-}
-```
-
-### 严格评分标准 (保持v2.2.0标准)
-- **8-10分**：仅给予信息完全准确、分析深入、表达清晰的优秀回答
-- **5-7分**：基本合格但存在明显不足的回答
-- **2-4分**：存在错误或质量较低的回答
-- **0-1分**：严重错误或完全不合格的回答
+### 环境配置流程 ⭐ v2.3.2
+1. **环境检测**：根据APP_ENV环境变量自动选择配置
+2. **配置加载**：加载对应的LocalConfig或ProductionConfig
+3. **前端配置同步**：启动脚本自动复制对应的环境配置文件
+4. **服务启动**：使用正确的端口和IP地址启动服务
 
 ## 📈 版本历史
+
+### v2.3.2 (2025-06-03) - 多环境配置与重复记录修复版本
+- 🌍 **多环境配置系统**：完美支持本地开发和生产环境切换
+- ✨ 环境配置中心：`config.py` 统一管理本地和生产环境配置
+- ✨ 一键启动脚本：`start_local.sh`、`start_production.sh` 等自动化脚本
+- ✨ 端口智能配置：本地(5001/3000) vs 生产(7860/8701)自动切换
+- ✨ IP地址自动配置：本地localhost vs 生产9.135.87.101智能切换
+- 🔒 **重复记录完全防护**：前后端双重机制彻底解决重复记录问题
+- ✨ 后端防重复：5分钟内相同内容检测，自动跳过重复保存
+- ✨ 前端防重复：30秒内存缓存，防止快速重复请求
+- ✨ 历史数据清理：清理现有重复记录，保证数据完整性
+- ✨ 实时监控：重复记录监控和统计功能
+- 📋 完整文档：环境配置、快速部署和配置总结指南
+- 🛡️ 系统稳定性：解决Flask路由冲突，优化云环境连接问题
 
 ### v2.3.1 (2025-06-03) - 配置数据全量同步版本
 - 🔄 **配置数据全量同步系统**：完美解决团队协作配置不一致问题
@@ -304,16 +389,6 @@ Content-Type: application/json
 - 📋 完整部署指南：`DEPLOYMENT_GUIDE.md` 和 `CONFIG_SYNC_GUIDE.md`
 - 📋 功能总结文档：`README_CONFIG_SYNC.md` 详细说明解决方案
 - 🛡️ 数据安全保障：配置数据与用户评估数据完全分离，确保隐私安全
-
-### v2.3.0 (2025-06-03) - 人工评估版本
-- 🎯 **人工评估系统**：支持专家对AI评估结果进行修正和补充
-- ✨ 新增人工评估表单，支持调整总分、维度分数和添加专家意见
-- ✨ 数据库扩展：添加人工评估相关字段（human_total_score等）
-- ✨ 历史管理增强：新增人工评估状态列和详情对比展示
-- ✨ AI vs 人工评估对比：清晰展示评估差异和修正理由
-- 🐛 修复表单验证问题：InputNumber组件替换Input type="number"
-- 🎨 视觉优化：用图标区分AI(🤖)和人工(👨‍💼)评估
-- 🔧 API扩展：新增PUT /api/evaluation-history/{id}/human-evaluation接口
 
 ### v2.2.0 (2025-06-01)
 - 🎯 **评估系统严格化**：全面提升评分的严格程度和准确性
@@ -362,9 +437,12 @@ Content-Type: application/json
 
 ## 📚 相关文档
 
-- [`DEPLOYMENT_GUIDE.md`](backend/DEPLOYMENT_GUIDE.md) - 完整部署指南
+- [`backend/ENVIRONMENT_SETUP_GUIDE.md`](backend/ENVIRONMENT_SETUP_GUIDE.md) - 环境配置详细指南 ⭐ 新增
+- [`backend/QUICK_DEPLOYMENT_GUIDE.md`](backend/QUICK_DEPLOYMENT_GUIDE.md) - 快速部署指南 ⭐ 新增
+- [`backend/ENVIRONMENT_CONFIGURATION_SUMMARY.md`](backend/ENVIRONMENT_CONFIGURATION_SUMMARY.md) - 配置实施报告 ⭐ 新增
+- [`backend/DEPLOYMENT_GUIDE.md`](backend/DEPLOYMENT_GUIDE.md) - 完整部署指南
 - [`README_CONFIG_SYNC.md`](README_CONFIG_SYNC.md) - 配置同步解决方案总结
-- [`CONFIG_SYNC_GUIDE.md`](backend/CONFIG_SYNC_GUIDE.md) - 详细使用指南
+- [`backend/CONFIG_SYNC_GUIDE.md`](backend/CONFIG_SYNC_GUIDE.md) - 详细使用指南
 
 ---
 
@@ -372,4 +450,11 @@ Content-Type: application/json
 - 🔄 **全量同步**：解决增量导入无法删除配置的问题
 - 👥 **团队协作**：多人开发配置标准完全一致
 - 🚀 **快速部署**：远端环境一键初始化
-- 🛡️ **数据安全**：配置与用户数据分离，自动备份 
+- 🛡️ **数据安全**：配置与用户数据分离，自动备份
+
+**环境配置解决方案亮点** ⭐ v2.3.2：
+- 🌍 **智能环境切换**：本地开发与生产环境一键切换
+- 🚀 **一键部署**：自动化启动脚本，零配置部署
+- 🔒 **重复记录防护**：前后端双重防护，确保数据质量
+- ⚡ **端口智能配置**：本地/生产端口自动适配
+- 🌐 **IP地址自动化**：localhost/生产IP智能配置 

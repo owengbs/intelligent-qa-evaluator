@@ -23,7 +23,7 @@ class EvaluationHistoryService:
     
     def save_evaluation_result(self, evaluation_data, classification_result=None):
         """
-        保存评估结果到历史记录
+        保存评估结果到历史记录（带重复检测）
         
         Args:
             evaluation_data: 评估结果数据
@@ -33,6 +33,30 @@ class EvaluationHistoryService:
             dict: 保存结果
         """
         try:
+            # ====== 新增：重复记录检测 ======
+            user_input = evaluation_data.get('user_input')
+            model_answer = evaluation_data.get('model_answer')
+            
+            if user_input and model_answer:
+                # 检查最近5分钟内是否有相同内容的记录
+                five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+                existing_record = EvaluationHistory.query.filter(
+                    EvaluationHistory.user_input == user_input,
+                    EvaluationHistory.model_answer == model_answer,
+                    EvaluationHistory.created_at >= five_minutes_ago
+                ).first()
+                
+                if existing_record:
+                    self.logger.warning(f"检测到重复记录，返回现有记录ID: {existing_record.id}")
+                    return {
+                        'success': True,
+                        'message': '检测到重复记录，返回现有记录',
+                        'history_id': existing_record.id,
+                        'data': existing_record.to_dict(),
+                        'is_duplicate': True
+                    }
+            # ====== 重复检测结束 ======
+            
             # 创建评估历史记录
             history_data = {
                 'user_input': evaluation_data.get('user_input'),
