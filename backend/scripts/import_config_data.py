@@ -57,8 +57,16 @@ def import_classification_standards(data_list, force_update=False):
                         print(f"⚠️  跳过已存在的分类标准: {item.get('level1')}-{item.get('level2')}-{item.get('level3')}")
                         continue
                 else:
-                    # 创建新记录
-                    new_standard = ClassificationStandard.from_dict(item)
+                    # 创建新记录 - 使用直接创建而不是from_dict方法
+                    new_standard = ClassificationStandard(
+                        level1=item.get('level1'),
+                        level1_definition=item.get('level1_definition'),
+                        level2=item.get('level2'),
+                        level3=item.get('level3'),
+                        level3_definition=item.get('level3_definition'),
+                        examples=item.get('examples'),
+                        is_default=item.get('is_default', False)
+                    )
                     db.session.add(new_standard)
                     imported_count += 1
             
@@ -68,7 +76,10 @@ def import_classification_standards(data_list, force_update=False):
             
     except Exception as e:
         print(f"❌ 导入分类标准失败: {e}")
-        db.session.rollback()
+        try:
+            db.session.rollback()
+        except:
+            pass
         return False
 
 
@@ -99,8 +110,15 @@ def import_evaluation_standards(data_list, force_update=False):
                         print(f"⚠️  跳过已存在的评估标准: {item.get('level2_category')}-{item.get('dimension')}")
                         continue
                 else:
-                    # 创建新记录
-                    new_standard = EvaluationStandard.from_dict(item)
+                    # 创建新记录 - 使用直接创建而不是from_dict方法
+                    new_standard = EvaluationStandard(
+                        level2_category=item.get('level2_category'),
+                        dimension=item.get('dimension'),
+                        reference_standard=item.get('reference_standard'),
+                        scoring_principle=item.get('scoring_principle'),
+                        max_score=item.get('max_score', 5),
+                        is_default=item.get('is_default', False)
+                    )
                     db.session.add(new_standard)
                     imported_count += 1
             
@@ -110,7 +128,10 @@ def import_evaluation_standards(data_list, force_update=False):
             
     except Exception as e:
         print(f"❌ 导入评估标准失败: {e}")
-        db.session.rollback()
+        try:
+            db.session.rollback()
+        except:
+            pass
         return False
 
 
@@ -161,6 +182,32 @@ def import_config_data(config_dir='config_data', force_update=False):
     return success
 
 
+def test_database_connection():
+    """测试数据库连接 - 兼容多个SQLAlchemy版本"""
+    try:
+        with app.app_context():
+            # 尝试新版SQLAlchemy API
+            try:
+                from sqlalchemy import text
+                result = db.session.execute(text('SELECT 1')).fetchone()
+                print("✅ 数据库连接正常 (使用新版API)")
+                return True
+            except Exception as e1:
+                # 如果新版API失败，尝试旧版API
+                try:
+                    result = db.engine.execute('SELECT 1').fetchone()
+                    print("✅ 数据库连接正常 (使用旧版API)")
+                    return True
+                except Exception as e2:
+                    print(f"❌ 数据库连接失败:")
+                    print(f"  新版API错误: {e1}")
+                    print(f"  旧版API错误: {e2}")
+                    return False
+    except Exception as e:
+        print(f"❌ 应用上下文错误: {e}")
+        return False
+
+
 def main():
     """主函数"""
     import argparse
@@ -179,14 +226,8 @@ def main():
     print(f"🔄 强制更新: {'是' if args.force_update else '否'}")
     print("=" * 50)
     
-    # 检查数据库连接
-    try:
-        with app.app_context():
-            # 测试数据库连接
-            db.engine.execute('SELECT 1').fetchone()
-            print("✅ 数据库连接正常")
-    except Exception as e:
-        print(f"❌ 数据库连接失败: {e}")
+    # 检查数据库连接 - 使用兼容性测试
+    if not test_database_connection():
         print("💡 请确保数据库文件存在并且应用配置正确")
         return False
     

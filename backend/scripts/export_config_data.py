@@ -123,11 +123,12 @@ def main():
     print("🚀 开始导出AI评估系统配置数据...")
     print("=" * 50)
     
-    # 检查数据库连接
+    # 检查数据库连接 - 修复API调用
     try:
         with app.app_context():
-            # 测试数据库连接
-            db.engine.execute('SELECT 1').fetchone()
+            # 使用新版SQLAlchemy API进行测试查询
+            from sqlalchemy import text
+            result = db.session.execute(text('SELECT 1')).fetchone()
             print("✅ 数据库连接正常")
     except Exception as e:
         print(f"❌ 数据库连接失败: {e}")
