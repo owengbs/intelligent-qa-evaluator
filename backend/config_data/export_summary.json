@@ -1,0 +1,11 @@
+{
+  "export_time": "2025-06-03T09:56:33.624494",
+  "classification_standards_count": 19,
+  "evaluation_standards_count": 28,
+  "total_records": 47,
+  "files": [
+    "classification_standards.json",
+    "evaluation_standards.json"
+  ],
+  "description": "AI评估系统配置数据导出摘要"
+}
