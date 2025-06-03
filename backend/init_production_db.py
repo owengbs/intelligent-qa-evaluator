@@ -16,6 +16,7 @@ try:
     from models.classification import ClassificationStandard, EvaluationStandard, EvaluationHistory
     from services.classification_service import ClassificationService
     from services.evaluation_standard_service import EvaluationStandardService
+    from sqlalchemy import text
     import logging
     
     def init_production_database():
@@ -24,9 +25,17 @@ try:
         
         with app.app_context():
             try:
-                # 检查数据库连接
+                # 检查数据库连接 - 兼容SQLAlchemy 2.0+
                 print("🔍 检查数据库连接...")
-                db.engine.execute('SELECT 1').fetchone()
+                try:
+                    # 新版SQLAlchemy方式
+                    with db.engine.connect() as connection:
+                        result = connection.execute(text('SELECT 1'))
+                        result.fetchone()
+                except AttributeError:
+                    # 旧版SQLAlchemy方式（备选）
+                    result = db.engine.execute('SELECT 1')
+                    result.fetchone()
                 print("✅ 数据库连接正常")
                 
                 # 创建所有表
@@ -89,6 +98,10 @@ try:
                     print(f"   - 目录可写: {os.access(db_dir, os.W_OK) if os.path.exists(db_dir) else 'N/A'}")
                     print(f"   - 文件存在: {os.path.exists(db_path)}")
                 
+                # 打印SQLAlchemy版本信息
+                import sqlalchemy
+                print(f"   - SQLAlchemy版本: {sqlalchemy.__version__}")
+                
                 return False
     
     def check_database_health():
@@ -97,8 +110,16 @@ try:
         
         with app.app_context():
             try:
-                # 测试基本连接
-                result = db.engine.execute('SELECT 1').fetchone()
+                # 测试基本连接 - 兼容SQLAlchemy 2.0+
+                try:
+                    # 新版SQLAlchemy方式
+                    with db.engine.connect() as connection:
+                        result = connection.execute(text('SELECT 1'))
+                        result.fetchone()
+                except AttributeError:
+                    # 旧版SQLAlchemy方式（备选）
+                    result = db.engine.execute('SELECT 1')
+                    result.fetchone()
                 print("✅ 基本连接: 正常")
                 
                 # 测试表访问

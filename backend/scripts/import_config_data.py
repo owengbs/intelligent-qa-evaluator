@@ -19,28 +19,24 @@ from models.classification import db, ClassificationStandard, EvaluationStandard
 
 
 def test_database_connection():
-    """测试数据库连接 - 兼容多个SQLAlchemy版本"""
+    """测试数据库连接"""
     try:
+        from sqlalchemy import text
+        
         with app.app_context():
-            # 尝试新版SQLAlchemy API
+            # 兼容SQLAlchemy 2.0+
             try:
-                from sqlalchemy import text
-                result = db.session.execute(text('SELECT 1')).fetchone()
-                print("✅ 数据库连接正常 (使用新版API)")
-                return True
-            except Exception as e1:
-                # 如果新版API失败，尝试旧版API
-                try:
-                    result = db.engine.execute('SELECT 1').fetchone()
-                    print("✅ 数据库连接正常 (使用旧版API)")
-                    return True
-                except Exception as e2:
-                    print(f"❌ 数据库连接失败:")
-                    print(f"  新版API错误: {e1}")
-                    print(f"  旧版API错误: {e2}")
-                    return False
+                # 新版SQLAlchemy方式
+                with db.engine.connect() as connection:
+                    result = connection.execute(text('SELECT 1'))
+                    result.fetchone()
+            except AttributeError:
+                # 旧版SQLAlchemy方式（备选）
+                result = db.engine.execute('SELECT 1')
+                result.fetchone()
+            return True
     except Exception as e:
-        print(f"❌ 应用上下文错误: {e}")
+        print(f"❌ 数据库连接测试失败: {str(e)}")
         return False
 
 
