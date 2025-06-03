@@ -14,7 +14,7 @@ os.environ['APP_ENV'] = 'production'
 try:
     from app import app, db
     from models.classification import ClassificationStandard, EvaluationStandard, EvaluationHistory
-    from services.classification_service import ClassificationService
+    from services.classification_service_sqlite import ClassificationService
     from services.evaluation_standard_service import EvaluationStandardService
     from sqlalchemy import text
     import logging
