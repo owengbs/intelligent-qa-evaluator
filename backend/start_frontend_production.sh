@@ -58,6 +58,37 @@ else
     echo "✅ 未发现proxy配置"
 fi
 
+# 🔧 新增：处理环境文件冲突，确保使用.env.production
+echo "🔧 处理环境文件冲突，确保使用.env.production..."
+
+# 检查是否存在会覆盖.env.production的文件
+conflict_found=false
+
+if [ -f ".env.local" ]; then
+    echo "⚠️  发现.env.local文件，会覆盖.env.production配置"
+    backup_name=".env.local.disabled.$(date +%Y%m%d_%H%M%S)"
+    mv ".env.local" "$backup_name"
+    echo "✅ .env.local 已重命名为: $backup_name"
+    conflict_found=true
+fi
+
+if [ -f ".env" ]; then
+    # 检查.env是否包含冲突的API URL
+    if grep -q "REACT_APP_API_URL" .env; then
+        echo "⚠️  发现.env文件包含API URL配置，可能影响生产环境"
+        backup_name=".env.disabled.$(date +%Y%m%d_%H%M%S)"
+        mv ".env" "$backup_name"
+        echo "✅ .env 已重命名为: $backup_name"
+        conflict_found=true
+    fi
+fi
+
+if [ "$conflict_found" = true ]; then
+    echo "🎉 环境文件冲突已解决"
+else
+    echo "✅ 无环境文件冲突"
+fi
+
 # 显示最终配置信息
 echo "🌍 环境: 生产环境"
 echo "🏠 前端地址: http://9.135.87.101:8701"

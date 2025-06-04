@@ -38,6 +38,45 @@ else
 fi
 
 echo ""
+echo "📋 1.1 检查环境文件冲突..."
+
+# 检查会影响.env.production的其他环境文件
+conflict_found=false
+
+if [ -f ".env.local" ]; then
+    echo "⚠️  发现 .env.local 文件（优先级高于.env.production）"
+    LOCAL_API_URL=$(grep "REACT_APP_API_URL" .env.local 2>/dev/null | cut -d'=' -f2)
+    if [ -n "$LOCAL_API_URL" ]; then
+        echo "   API URL: $LOCAL_API_URL"
+        echo "💡 建议: 运行 ./ensure_production_env.sh 处理冲突"
+        conflict_found=true
+    fi
+fi
+
+if [ -f ".env" ]; then
+    if grep -q "REACT_APP_API_URL" .env 2>/dev/null; then
+        echo "⚠️  发现 .env 文件包含 REACT_APP_API_URL"
+        ENV_API_URL=$(grep "REACT_APP_API_URL" .env | cut -d'=' -f2)
+        echo "   API URL: $ENV_API_URL"
+        echo "💡 建议: 运行 ./ensure_production_env.sh 处理冲突"
+        conflict_found=true
+    fi
+fi
+
+if [ -f ".env.production.local" ]; then
+    echo "⚠️  发现 .env.production.local 文件（最高优先级）"
+    LOCAL_PROD_API_URL=$(grep "REACT_APP_API_URL" .env.production.local 2>/dev/null | cut -d'=' -f2)
+    if [ -n "$LOCAL_PROD_API_URL" ]; then
+        echo "   API URL: $LOCAL_PROD_API_URL"
+        conflict_found=true
+    fi
+fi
+
+if [ "$conflict_found" = false ]; then
+    echo "✅ 无环境文件冲突"
+fi
+
+echo ""
 echo "📋 2. 检查package.json配置..."
 
 # 检查proxy配置
