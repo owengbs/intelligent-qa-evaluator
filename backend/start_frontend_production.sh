@@ -1,6 +1,7 @@
 #!/bin/bash
 """
 生产环境前端启动脚本
+修复IP和端口配置问题
 """
 
 echo "🖥️  启动生产环境前端服务..."
@@ -14,14 +15,54 @@ fi
 # 切换到前端目录
 cd ../frontend
 
+# 备份现有环境配置（如果存在）
+if [ -f ".env.production" ]; then
+    echo "💾 备份现有生产环境配置..."
+    cp .env.production .env.production.backup.$(date +%Y%m%d_%H%M%S)
+fi
+
 # 复制生产环境配置
 echo "🔧 配置生产环境..."
 cp ../backend/env_production.txt .env.production
 
-# 显示配置信息
+# 验证配置是否正确复制
+echo "🔍 验证环境配置..."
+if [ -f ".env.production" ]; then
+    echo "✅ 环境配置文件已创建"
+    echo "📋 当前配置内容:"
+    cat .env.production
+    echo ""
+else
+    echo "❌ 环境配置文件复制失败"
+    exit 1
+fi
+
+# 检查并修复package.json中的proxy配置（生产环境不需要）
+echo "🔧 检查package.json proxy配置..."
+if grep -q '"proxy"' package.json; then
+    echo "⚠️  发现proxy配置，备份并移除..."
+    # 备份package.json
+    cp package.json package.json.backup.$(date +%Y%m%d_%H%M%S)
+    
+    # 移除proxy配置（生产环境不需要）
+    if command -v jq &> /dev/null; then
+        # 使用jq移除proxy
+        jq 'del(.proxy)' package.json > package.json.tmp && mv package.json.tmp package.json
+        echo "✅ 使用jq移除proxy配置"
+    else
+        # 使用sed移除proxy行
+        sed -i.bak '/\"proxy\":/d' package.json
+        echo "✅ 使用sed移除proxy配置"
+    fi
+else
+    echo "✅ 未发现proxy配置"
+fi
+
+# 显示最终配置信息
 echo "🌍 环境: 生产环境"
 echo "🏠 前端地址: http://9.135.87.101:8701"
 echo "🌐 API地址: http://9.135.87.101:7860/api"
+echo "📡 实际API配置: $(grep REACT_APP_API_URL .env.production || echo '未找到')"
 
 # 检查依赖
 if [ ! -d "node_modules" ]; then
@@ -39,14 +80,35 @@ if ! npx serve --version &> /dev/null; then
     }
 fi
 
+# 清理之前的构建
+if [ -d "build" ]; then
+    echo "🧹 清理旧的构建文件..."
+    rm -rf build
+fi
+
 # 生产环境构建
 echo "🔨 构建生产版本..."
-npm run build
+REACT_APP_API_URL=http://9.135.87.101:7860/api npm run build
 
 # 检查构建是否成功
 if [ ! -d "build" ]; then
     echo "❌ 错误: 构建失败，未找到build目录"
     exit 1
+fi
+
+echo "✅ 构建成功，build目录已生成"
+
+# 验证构建结果中的配置
+echo "🔍 验证构建结果..."
+if [ -f "build/static/js/main.*.js" ]; then
+    MAIN_JS_FILE=$(find build/static/js -name "main.*.js" | head -1)
+    if grep -q "9.135.87.101:7860" "$MAIN_JS_FILE"; then
+        echo "✅ 构建文件中包含正确的API地址"
+    else
+        echo "⚠️  构建文件中可能未包含正确的API地址"
+        echo "🔍 检查构建中的API配置..."
+        grep -o "http://[^\"]*api" "$MAIN_JS_FILE" | head -3 || echo "未找到API配置"
+    fi
 fi
 
 # 启动前端服务（生产模式）
@@ -55,15 +117,18 @@ echo "🚀 启动前端服务 (端口: 8701)..."
 # 方法1: 尝试使用全局npx serve
 if npx serve --version &> /dev/null 2>&1; then
     echo "✅ 使用 npx serve 启动服务..."
+    echo "🌐 访问地址: http://9.135.87.101:8701"
     npx serve -s build -l 8701 --cors
 # 方法2: 尝试使用本地serve
 elif [ -f "node_modules/.bin/serve" ]; then
     echo "✅ 使用本地serve启动服务..."
+    echo "🌐 访问地址: http://9.135.87.101:8701"
     ./node_modules/.bin/serve -s build -l 8701 --cors
 # 方法3: 使用Python HTTP服务器 + CORS支持
 elif command -v python3 &> /dev/null; then
     echo "⚠️  serve不可用，使用Python3 HTTP服务器..."
     cd build
+    echo "🌐 访问地址: http://9.135.87.101:8701"
     python3 -c "
 import http.server
 import socketserver
@@ -81,7 +146,7 @@ PORT = 8701
 Handler = CORSRequestHandler
 
 try:
-    with socketserver.TCPServer(('', PORT), Handler) as httpd:
+    with socketserver.TCPServer(('0.0.0.0', PORT), Handler) as httpd:
         print(f'✅ 服务器运行在端口 {PORT}')
         print(f'🌐 访问地址: http://9.135.87.101:{PORT}')
         httpd.serve_forever()
@@ -96,6 +161,7 @@ except Exception as e:
 elif command -v node &> /dev/null; then
     echo "⚠️  使用Node.js内置服务器..."
     cd build
+    echo "🌐 访问地址: http://9.135.87.101:8701"
     node -e "
 const http = require('http');
 const fs = require('fs');
@@ -151,7 +217,7 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log('✅ Node.js服务器运行在端口', PORT);
     console.log('🌐 访问地址: http://9.135.87.101:' + PORT);
 });
