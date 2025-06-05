@@ -25,8 +25,10 @@ import axios from 'axios';
 
 const { Title, Text } = Typography;
 
-// 配置axios
+// 配置axios - 使用环境变量中的API地址
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const api = axios.create({
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -42,7 +44,7 @@ const DimensionStatistics = () => {
   const fetchDimensionStatistics = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get('/api/dimension-statistics');
+      const response = await api.get('/dimension-statistics');
       
       if (response.data.success) {
         setStatisticsData(response.data.data);

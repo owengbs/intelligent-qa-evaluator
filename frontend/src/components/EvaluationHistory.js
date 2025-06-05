@@ -33,8 +33,10 @@ const { RangePicker } = DatePicker;
 const { Option } = Select;
 const { Title, Text, Paragraph } = Typography;
 
-// 配置axios
+// 配置axios - 使用环境变量中的API地址
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const api = axios.create({
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -85,7 +87,7 @@ const EvaluationHistory = () => {
         params.end_date = filters.dateRange[1].endOf('day').toISOString();
       }
 
-      const response = await api.get('/api/evaluation-history', { params });
+      const response = await api.get('/evaluation-history', { params });
       
       if (response.data.success) {
         setHistoryData(response.data.data.items);
@@ -109,7 +111,7 @@ const EvaluationHistory = () => {
   const fetchStatistics = useCallback(async () => {
     try {
       setStatisticsLoading(true);
-      const response = await api.get('/api/evaluation-statistics');
+      const response = await api.get('/evaluation-statistics');
       
       if (response.data.success) {
         setStatisticsData(response.data.data);

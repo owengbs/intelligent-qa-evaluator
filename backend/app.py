@@ -70,6 +70,16 @@ def health_check():
         'version': '2.1.0'
     })
 
+@app.route('/api/health', methods=['GET'])
+def api_health_check():
+    """API健康检查"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'version': '2.1.0',
+        'api_status': 'active'
+    })
+
 @app.route('/api/variable-info', methods=['GET'])
 def get_variable_info():
     """获取可用变量信息"""

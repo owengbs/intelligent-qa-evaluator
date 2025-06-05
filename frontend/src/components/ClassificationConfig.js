@@ -33,8 +33,10 @@ import axios from 'axios';
 const { TextArea } = Input;
 const { Title, Text, Paragraph } = Typography;
 
-// 配置axios baseURL - 由于有proxy配置，可以使用相对路径
+// 配置axios baseURL - 使用环境变量中的API地址
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const api = axios.create({
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -53,7 +55,7 @@ const ClassificationConfig = () => {
   const loadClassificationStandards = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get('/api/classification-standards');
+      const response = await api.get('/classification-standards');
       setStandards(response.data.standards || []);
       
       // 计算统计信息
@@ -121,7 +123,7 @@ const ClassificationConfig = () => {
       }
       
       // 更新到后端
-      const response = await api.post('/api/classification-standards', {
+      const response = await api.post('/classification-standards', {
         standards: newStandards
       });
       
@@ -144,7 +146,7 @@ const ClassificationConfig = () => {
     try {
       const newStandards = standards.filter(item => item !== record);
       
-      const response = await api.post('/api/classification-standards', {
+      const response = await api.post('/classification-standards', {
         standards: newStandards
       });
       
@@ -164,7 +166,7 @@ const ClassificationConfig = () => {
   // 重置为默认
   const handleReset = async () => {
     try {
-      const response = await api.post('/api/classification-standards/reset');
+      const response = await api.post('/classification-standards/reset');
       
       if (response.data.success) {
         await loadClassificationStandards();

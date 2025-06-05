@@ -31,6 +31,16 @@ import {
 } from '@ant-design/icons';
 import axios from 'axios';
 
+// 配置API基础URL
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
 const { TabPane } = Tabs;
 const { TextArea } = Input;
 const { Option } = Select;
@@ -59,7 +69,7 @@ const EvaluationStandardConfig = () => {
   const loadEvaluationStandards = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/evaluation-standards/grouped');
+      const response = await api.get('/evaluation-standards/grouped');
       if (response.data.success) {
         setGroupedStandards(response.data.data);
         
@@ -110,11 +120,11 @@ const EvaluationStandardConfig = () => {
       
       if (editingStandard) {
         // 更新现有标准
-        await axios.put(`/api/evaluation-standards/${editingStandard.id}`, values);
+        await api.put(`/evaluation-standards/${editingStandard.id}`, values);
         message.success('评估标准更新成功');
       } else {
         // 创建新标准
-        await axios.post('/api/evaluation-standards', values);
+        await api.post('/evaluation-standards', values);
         message.success('评估标准创建成功');
       }
       
@@ -132,7 +142,7 @@ const EvaluationStandardConfig = () => {
   // 删除评估标准
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`/api/evaluation-standards/${id}`);
+      await api.delete(`/evaluation-standards/${id}`);
       message.success('评估标准删除成功');
       loadEvaluationStandards();
     } catch (error) {

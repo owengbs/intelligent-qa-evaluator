@@ -40,8 +40,10 @@ import axios from 'axios';
 const { TextArea } = Input;
 const { Title, Text, Paragraph } = Typography;
 
-// 配置axios baseURL - 由于有proxy配置，可以使用相对路径
+// 配置axios baseURL - 使用环境变量中的API地址
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const api = axios.create({
+  baseURL: API_BASE_URL,
   timeout: 120000, // 增加超时时间到120秒，适应大模型长时间思考的情况
   headers: {
     'Content-Type': 'application/json',
@@ -871,7 +873,7 @@ ${dimensionRequirements}
     
     try {
       setClassificationLoading(true);
-      const response = await api.post('/api/classify', {
+      const response = await api.post('/classify', {
         userQuery: userInput
       });
       

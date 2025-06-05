@@ -384,8 +384,10 @@ class EvaluationHistoryService:
             # 格式化趋势数据
             trend_data = []
             for trend in recent_trend:
+                # SQLite的func.date()返回字符串，直接使用
+                date_str = trend.date if isinstance(trend.date, str) else trend.date.isoformat()
                 trend_data.append({
-                    'date': trend.date.isoformat(),
+                    'date': date_str,
                     'count': trend.count,
                     'avg_score': round(trend.avg_score, 2) if trend.avg_score else 0
                 })
