@@ -286,7 +286,7 @@ ${dimensionRequirements}
       
       // 调用API更新人工评估 - 只调用一次，使用PUT方法
       console.log('提交人工评估数据:', humanData);
-      const response = await api.put(`/api/evaluation-history/${currentHistoryId}/human-evaluation`, humanData);
+      const response = await api.put(`/evaluation-history/${currentHistoryId}/human-evaluation`, humanData);
       
       if (response.data.success) {
         message.success('人工评估保存成功');
@@ -923,7 +923,7 @@ ${dimensionRequirements}
       console.log('正在获取分类评估标准:', level2Category);
       
       // 调用API获取对应分类的评估标准
-      const response = await api.get(`/api/evaluation-template/${level2Category}`);
+      const response = await api.get(`/evaluation-template/${level2Category}`);
       
       if (response.data.success && response.data.data) {
         const template = response.data.data;

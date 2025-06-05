@@ -137,7 +137,7 @@ const EvaluationHistory = () => {
   // 删除评估记录
   const handleDelete = async (historyId) => {
     try {
-      const response = await api.delete(`/api/evaluation-history/${historyId}`);
+      const response = await api.delete(`/evaluation-history/${historyId}`);
       
       if (response.data.success) {
         message.success('删除成功');
