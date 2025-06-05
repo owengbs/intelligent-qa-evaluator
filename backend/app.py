@@ -4,6 +4,10 @@ from flask_cors import CORS
 from datetime import datetime
 import logging
 import traceback
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 导入配置
 from config import config
