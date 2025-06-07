@@ -16,7 +16,8 @@ import {
   Typography,
   Tooltip,
   Empty,
-  Spin
+  Spin,
+  Image
 } from 'antd';
 import {
   EyeOutlined,
@@ -185,6 +186,145 @@ const EvaluationHistory = () => {
     timeliness: '时效性',
     usability: '可用性',
     compliance: '合规性'
+  };
+
+  // 获取图片完整URL
+  const getImageUrl = (imageUrl) => {
+    if (!imageUrl) return '';
+    
+    // 如果已经是完整URL，直接返回
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      return imageUrl;
+    }
+    
+    // 如果是相对路径，拼接API地址
+    if (imageUrl.startsWith('/api/')) {
+      return `${API_BASE_URL.replace('/api', '')}${imageUrl}`;
+    }
+    
+    // 默认返回原URL
+    return imageUrl;
+  };
+
+  // 渲染图片历史组件
+  const renderImageHistory = (images) => {
+    if (!images || images.length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: '16px', color: '#999' }}>
+          <span>📷</span>
+          <Text type="secondary"> 本次评估未使用图片</Text>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ margin: '12px 0' }}>
+        <Text strong style={{ color: '#1890ff', marginBottom: '8px', display: 'block' }}>
+          📸 评估中使用的图片 ({images.length}张)
+        </Text>
+        <div style={{ 
+          display: 'flex', 
+          flexWrap: 'wrap', 
+          gap: '8px',
+          maxHeight: '300px',
+          overflowY: 'auto',
+          padding: '8px',
+          backgroundColor: '#fafafa',
+          borderRadius: '6px',
+          border: '1px solid #d9d9d9'
+        }}>
+          {images.map((image, index) => (
+            <div key={image.id || index} style={{ position: 'relative' }}>
+              <Image
+                src={getImageUrl(image.previewUrl)}
+                alt={image.name}
+                width={100}
+                height={100}
+                style={{ 
+                  objectFit: 'cover',
+                  borderRadius: '4px',
+                  border: '1px solid #d9d9d9',
+                  cursor: 'pointer'
+                }}
+                preview={{
+                  src: getImageUrl(image.previewUrl),
+                  mask: (
+                    <div style={{ textAlign: 'center' }}>
+                      <EyeOutlined style={{ fontSize: '16px' }} />
+                      <br />
+                      <Text style={{ fontSize: '10px', color: 'white' }}>查看大图</Text>
+                    </div>
+                  )
+                }}
+                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG8W+2V1JhQQzYEDHBOGGLkNHGBOOUEUKMLhD1YQhJW1YMcAV2gZLwBdgGBM4Y7QqKiQ3YCUNzFUtzuVJhw="
+              />
+              {image.ocrText && (
+                <Tooltip 
+                  title={
+                    <div style={{ maxWidth: '300px' }}>
+                      <Text strong style={{ color: '#fff' }}>OCR识别结果:</Text>
+                      <br />
+                      <Text style={{ color: '#fff' }}>
+                        {image.ocrText.length > 200 
+                          ? `${image.ocrText.substring(0, 200)}...` 
+                          : image.ocrText
+                        }
+                      </Text>
+                    </div>
+                  }
+                  placement="topLeft"
+                >
+                  <div style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    backgroundColor: '#52c41a',
+                    borderRadius: '50%',
+                    width: '20px',
+                    height: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12px',
+                    color: 'white',
+                    border: '2px solid white',
+                    cursor: 'help'
+                  }}>
+                    ✓
+                  </div>
+                </Tooltip>
+              )}
+              <div style={{
+                position: 'absolute',
+                bottom: '2px',
+                left: '2px',
+                right: '2px',
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                color: 'white',
+                fontSize: '10px',
+                padding: '2px 4px',
+                borderRadius: '0 0 4px 4px',
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {image.name}
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        {/* 图片统计信息 */}
+        <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+          <Space split={<span>•</span>}>
+            <span>总计 {images.length} 张图片</span>
+            <span>已识别 {images.filter(img => img.ocrText).length} 张</span>
+            <span>总大小 {(images.reduce((sum, img) => sum + (img.size || 0), 0) / 1024 / 1024).toFixed(2)} MB</span>
+          </Space>
+        </div>
+      </div>
+    );
   };
 
   // 表格列定义
@@ -512,6 +652,13 @@ const EvaluationHistory = () => {
                     </div>
                   )}
                 </Space>
+              </Card>
+            </Col>
+
+            {/* 图片历史展示 */}
+            <Col span={24}>
+              <Card size="small" title="上传图片">
+                {renderImageHistory(selectedRecord.uploaded_images)}
               </Card>
             </Col>
 

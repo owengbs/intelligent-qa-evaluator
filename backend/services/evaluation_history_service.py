@@ -71,7 +71,8 @@ class EvaluationHistoryService:
                 'reasoning': evaluation_data.get('reasoning'),
                 'evaluation_time_seconds': evaluation_data.get('evaluation_time_seconds'),
                 'model_used': evaluation_data.get('model_used'),
-                'raw_response': evaluation_data.get('raw_response')
+                'raw_response': evaluation_data.get('raw_response'),
+                'uploaded_images': evaluation_data.get('uploaded_images', [])  # 添加图片信息
             }
             
             # 如果有分类结果，添加分类信息

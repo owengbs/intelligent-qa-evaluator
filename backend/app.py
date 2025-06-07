@@ -22,6 +22,9 @@ from services.evaluation_standard_service import EvaluationStandardService
 from services.evaluation_history_service import EvaluationHistoryService
 from utils.logger import get_logger
 
+# 导入路由蓝图
+from routes.upload_routes import upload_bp
+
 # 创建Flask应用
 app = Flask(__name__)
 
@@ -30,6 +33,9 @@ app.config.from_object(config)
 
 # 启用CORS
 CORS(app)
+
+# 注册蓝图
+app.register_blueprint(upload_bp)
 
 # 获取日志记录器
 logger = get_logger(__name__)
@@ -114,8 +120,9 @@ def evaluate():
         question_time = data.get('question_time', datetime.now().isoformat())
         evaluation_criteria = data.get('evaluation_criteria', '请评估答案的准确性、相关性和有用性')
         scoring_prompt = data.get('scoring_prompt')  # 自定义的评分prompt
+        uploaded_images = data.get('uploaded_images', [])  # 上传的图片信息
         
-        logger.info(f"开始评估 - 用户问题长度: {len(user_input)}, 模型回答长度: {len(model_answer)}, 参考答案长度: {len(reference_answer)}, 问题时间: {question_time}, 评估标准长度: {len(evaluation_criteria)}")
+        logger.info(f"开始评估 - 用户问题长度: {len(user_input)}, 模型回答长度: {len(model_answer)}, 参考答案长度: {len(reference_answer)}, 问题时间: {question_time}, 评估标准长度: {len(evaluation_criteria)}, 图片数量: {len(uploaded_images)}")
         
         # 首先进行分类
         classification_result = classification_service.classify_user_input(user_input)
@@ -160,7 +167,8 @@ def evaluate():
                 'reasoning': result.get('reasoning'),
                 'evaluation_time_seconds': result.get('evaluation_time_seconds'),
                 'model_used': result.get('model_used'),
-                'raw_response': result.get('raw_response')
+                'raw_response': result.get('raw_response'),
+                'uploaded_images': uploaded_images  # 添加图片信息
             }
             
             # 保存到历史记录

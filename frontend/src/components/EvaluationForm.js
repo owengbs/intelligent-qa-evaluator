@@ -20,7 +20,10 @@ import {
   message,
   DatePicker,
   Badge,
-  InputNumber
+  InputNumber,
+  Upload,
+  Image,
+  Tooltip
 } from 'antd';
 import { 
   ClearOutlined, 
@@ -31,11 +34,51 @@ import {
   TagOutlined,
   RobotOutlined,
   ThunderboltOutlined,
-  SendOutlined
+  SendOutlined,
+  PictureOutlined,
+  DeleteOutlined,
+  ScanOutlined
 } from '@ant-design/icons';
 import { submitEvaluation, clearResult, clearError, clearHistory } from '../store/evaluationSlice';
 import dayjs from 'dayjs';
 import axios from 'axios';
+import { 
+  recognizeText, 
+  recognizeTextSimple,
+  extractImageFromPaste, 
+  isValidImageFile, 
+  isValidFileSize, 
+  createImagePreviewUrl, 
+  revokeImagePreviewUrl,
+  getOCRProgressText
+} from '../utils/ocrProcessor';
+
+// 导入本地化OCR处理器
+import { 
+  smartOCRRecognize,
+  testNetworkConnectivity
+} from '../utils/ocrProcessorLocal';
+
+// 导入超简单OCR处理器（修复序列化问题）
+import { 
+  recognizeTextWithProgress,
+  preloadOCRResources,
+  checkOCRAvailability
+} from '../utils/ocrProcessorSimple';
+
+// 导入修复版OCR处理器
+import { 
+  recognizeTextFixed,
+  preloadOCRResourcesFixed,
+  testOCRFunction
+} from '../utils/ocrProcessorFixed';
+
+// 开发模式下导入诊断工具
+if (process.env.NODE_ENV === 'development') {
+  import('../utils/ocrDiagnostic').then(() => {
+    console.log('🔧 OCR诊断工具已加载，可在控制台使用 window.ocrDiagnostic');
+  });
+}
 
 const { TextArea } = Input;
 const { Title, Text, Paragraph } = Typography;
@@ -67,12 +110,360 @@ const EvaluationForm = () => {
   const [humanForm] = Form.useForm();
   const [currentHistoryId, setCurrentHistoryId] = useState(null);
   
+  // 图片识别相关状态
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  // eslint-disable-next-line no-unused-vars
+  const [currentImageFile, setCurrentImageFile] = useState(null);
+  
+  // 强制刷新状态
+  const [forceRenderKey, setForceRenderKey] = useState(0);
+  const [modelResponseValue, setModelResponseValue] = useState('');
+  
+  // 图片历史记录状态
+  const [uploadedImages, setUploadedImages] = useState([]);
+  
   // Redux状态
   const { isLoading, result, error, history } = useSelector((state) => state.evaluation);
 
   // 添加防重复提交状态跟踪
   const [humanEvaluationSubmitting, setHumanEvaluationSubmitting] = useState(false);
   const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
+
+  // 图片识别处理函数
+  const handleImageUpload = async (file) => {
+    try {
+      // 验证文件类型和大小
+      if (!isValidImageFile(file)) {
+        message.error('请上传PNG、JPG或JPEG格式的图片');
+        return false;
+      }
+
+      if (!isValidFileSize(file, 5)) {
+        message.error('图片大小不能超过5MB');
+        return false;
+      }
+
+      // 清理之前的预览URL
+      if (imagePreview) {
+        revokeImagePreviewUrl(imagePreview);
+      }
+
+      // 上传图片到服务器
+      console.log('📤 开始上传图片到服务器...');
+      const uploadedImageInfo = await uploadImageToServer(file);
+      
+      if (!uploadedImageInfo) {
+        message.error('图片上传失败，请重试');
+        return false;
+      }
+
+      // 设置预览URL（使用服务器URL）
+      setImagePreview(uploadedImageInfo.url);
+      setCurrentImageFile(file);
+
+      // 保存图片信息到历史记录
+      const imageInfo = {
+        id: uploadedImageInfo.id,
+        name: uploadedImageInfo.name,
+        size: uploadedImageInfo.size,
+        type: uploadedImageInfo.type,
+        previewUrl: uploadedImageInfo.url, // 使用服务器URL
+        uploadTime: uploadedImageInfo.upload_time,
+        ocrText: '', // 将在OCR识别后更新
+        filename: uploadedImageInfo.filename
+      };
+      
+      setUploadedImages(prev => [...prev, imageInfo]);
+      message.success('图片上传成功！');
+
+      // 开始OCR识别
+      await performOCR(file, imageInfo.id);
+      
+      return false; // 阻止Upload组件的默认上传行为
+    } catch (error) {
+      console.error('图片处理失败:', error);
+      message.error('图片处理失败');
+      return false;
+    }
+  };
+
+  // 上传图片到服务器
+  const uploadImageToServer = async (file) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch(`${API_BASE_URL}/upload/image`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ 图片上传成功:', result.data);
+        return result.data;
+      } else {
+        console.error('❌ 图片上传失败:', result.message);
+        message.error(result.message);
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ 图片上传请求失败:', error);
+      message.error('网络请求失败，请检查网络连接');
+      return null;
+    }
+  };
+
+  // 执行OCR识别
+  const performOCR = async (file, imageId = null) => {
+    try {
+      setOcrLoading(true);
+      setOcrProgress(0);
+
+      console.log('🚀 开始超简单OCR识别流程...');
+
+      // 使用超简单OCR识别（避免序列化问题）
+      console.log('🔍 开始OCR识别，文件信息:', {
+        name: file.name,
+        size: file.size,
+        type: file.type
+      });
+
+      const recognizedText = await recognizeTextFixed(file, {
+        onProgress: (progress) => {
+          console.log(`📈 OCR进度更新: ${progress}%`);
+          setOcrProgress(progress);
+        },
+        timeout: 120000 // 2分钟超时
+      });
+
+      console.log('📄 OCR识别原始结果:', {
+        text: recognizedText,
+        length: recognizedText ? recognizedText.length : 0,
+        hasContent: !!(recognizedText && recognizedText.trim())
+      });
+
+      if (recognizedText && recognizedText.trim()) {
+        // 更新图片历史记录中的OCR文本
+        if (imageId) {
+          setUploadedImages(prev => prev.map(img => 
+            img.id === imageId 
+              ? { ...img, ocrText: recognizedText }
+              : img
+          ));
+        }
+        
+        // 获取当前模型回答的值
+        const currentModelResponse = form.getFieldValue('modelResponse') || '';
+        console.log('📝 当前表单内容:', currentModelResponse);
+        
+        // 如果当前有内容，在末尾添加识别的文字，否则直接设置
+        const newText = currentModelResponse 
+          ? `${currentModelResponse}\n\n${recognizedText}` 
+          : recognizedText;
+        
+        console.log('📝 准备填入的新内容:', newText);
+        
+        // 使用专门的填入函数
+        const fillSuccess = await fillModelResponseText(newText);
+        
+        if (!fillSuccess) {
+          console.error('❌ 自动填入失败');
+          message.warning({
+            content: `自动填入失败，请手动复制以下内容：${newText}`,
+            duration: 10,
+            style: { marginTop: '100px' }
+          });
+          
+          // 复制到剪贴板作为备选方案
+          try {
+            await navigator.clipboard.writeText(newText);
+            message.info('✅ 文本已复制到剪贴板，请手动粘贴到模型回答框');
+          } catch (clipboardError) {
+            console.warn('剪贴板复制失败:', clipboardError);
+          }
+        }
+
+        message.success(`✅ OCR识别成功！已添加 ${recognizedText.length} 个字符到模型回答中`);
+        console.log('📄 最终识别结果:', recognizedText);
+        
+      } else {
+        console.warn('⚠️ OCR识别结果为空或仅包含空白字符');
+        message.warning('未识别到任何文字，请尝试使用更清晰的图片或检查图片中是否包含文字内容');
+      }
+      
+    } catch (error) {
+      console.error('❌ OCR识别失败:', error);
+      
+      // 根据错误类型提供不同的建议
+      let errorMsg = error.message;
+      if (error.message.includes('网络')) {
+        errorMsg += '\n💡 建议：检查网络连接，或尝试使用手机热点';
+      } else if (error.message.includes('超时')) {
+        errorMsg += '\n💡 建议：图片可能过大，请尝试压缩图片后重新上传';
+      }
+      
+      message.error(`OCR识别失败: ${errorMsg}`);
+    } finally {
+      setOcrLoading(false);
+      setOcrProgress(0);
+    }
+  };
+
+  // 处理粘贴图片事件
+  const handleTextAreaPaste = async (event) => {
+    const imageFile = extractImageFromPaste(event);
+    if (imageFile) {
+      event.preventDefault(); // 阻止默认粘贴行为
+      await handlePastedImageUpload(imageFile);
+    }
+  };
+
+  // 处理粘贴的图片上传
+  const handlePastedImageUpload = async (file) => {
+    try {
+      console.log('📋 处理粘贴的图片:', file);
+      
+      // 使用base64方式上传粘贴的图片
+      const base64Data = await fileToBase64(file);
+      const uploadedImageInfo = await uploadBase64ImageToServer(base64Data, file.name);
+      
+      if (!uploadedImageInfo) {
+        message.error('粘贴图片上传失败，请重试');
+        return;
+      }
+
+      // 保存图片信息到历史记录
+      const imageInfo = {
+        id: uploadedImageInfo.id,
+        name: uploadedImageInfo.name,
+        size: uploadedImageInfo.size,
+        type: uploadedImageInfo.type,
+        previewUrl: uploadedImageInfo.url,
+        uploadTime: uploadedImageInfo.upload_time,
+        ocrText: '',
+        filename: uploadedImageInfo.filename
+      };
+      
+      setUploadedImages(prev => [...prev, imageInfo]);
+      message.success('粘贴图片上传成功！');
+
+      // 开始OCR识别
+      await performOCR(file, imageInfo.id);
+      
+    } catch (error) {
+      console.error('粘贴图片处理失败:', error);
+      message.error('粘贴图片处理失败');
+    }
+  };
+
+  // 文件转base64
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // 上传base64图片到服务器
+  const uploadBase64ImageToServer = async (base64Data, filename) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/upload/image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageData: base64Data,
+          filename: filename || 'pasted_image.png'
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Base64图片上传成功:', result.data);
+        return result.data;
+      } else {
+        console.error('❌ Base64图片上传失败:', result.message);
+        message.error(result.message);
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Base64图片上传请求失败:', error);
+      message.error('网络请求失败，请检查网络连接');
+      return null;
+    }
+  };
+
+  // 清空图片
+  const clearImage = () => {
+    if (imagePreview) {
+      revokeImagePreviewUrl(imagePreview);
+    }
+    setImagePreview(null);
+    setCurrentImageFile(null);
+    setOcrLoading(false);
+    setOcrProgress(0);
+  };
+
+    // 专门的表单填入函数 - 使用React状态强制刷新
+  const fillModelResponseText = (text) => {
+    console.log('🎯 开始填入文本到模型回答框:', text);
+    
+    return new Promise((resolve) => {
+      try {
+        // 直接更新React状态 - 现在是受控组件
+        console.log('📋 更新React状态和表单');
+        
+        // 1. 更新状态
+        setModelResponseValue(text);
+        
+        // 2. 更新表单
+        form.setFieldsValue({ modelResponse: text });
+        
+        // 3. 强制重新渲染
+        setForceRenderKey(prev => prev + 1);
+        
+        console.log('✅ 状态更新完成');
+        
+        // 验证更新是否成功
+        setTimeout(() => {
+          const formValue = form.getFieldValue('modelResponse');
+          const stateValue = text; // modelResponseValue should be updated
+          
+          console.log('🔍 验证结果:', {
+            formValue,
+            stateValue,
+            expected: text,
+            formMatch: formValue === text,
+            stateMatch: stateValue === text
+          });
+          
+          // 由于是受控组件，状态更新应该立即反映在UI上
+          resolve(true);
+        }, 100);
+        
+      } catch (error) {
+        console.error('❌ 填入过程出错:', error);
+        resolve(false);
+      }
+    });
+  };
+
+  // 组件卸载时清理资源
+  useEffect(() => {
+    return () => {
+      if (imagePreview) {
+        revokeImagePreviewUrl(imagePreview);
+      }
+    };
+  }, [imagePreview]);
 
   // 动态生成评分prompt - 根据评估标准自动生成维度评分要求
   const generateScoringPrompt = (evaluationCriteria) => {
@@ -190,7 +581,8 @@ ${dimensionRequirements}
         reference_answer: values.referenceAnswer || '',  // referenceAnswer -> reference_answer
         question_time: values.questionTime ? values.questionTime.format('YYYY-MM-DD HH:mm:ss') : dayjs().format('YYYY-MM-DD HH:mm:ss'),
         evaluation_criteria: values.evaluationCriteria,  // evaluationCriteria -> evaluation_criteria
-        scoring_prompt: dynamicScoringPrompt  // 使用动态生成的scoring_prompt
+        scoring_prompt: dynamicScoringPrompt,  // 使用动态生成的scoring_prompt
+        uploaded_images: uploadedImages  // 添加图片历史记录
       };
       
       console.log('表单验证通过，提交评估:', formattedValues);
@@ -215,6 +607,8 @@ ${dimensionRequirements}
     });
     dispatch(clearResult());
     setClassification(null);
+    clearImage(); // 清理图片状态
+    setUploadedImages([]); // 清理图片历史记录
   };
 
   // 人工评估相关函数
@@ -485,6 +879,144 @@ ${dimensionRequirements}
     );
   };
 
+  // 获取图片完整URL
+  const getImageUrl = (imageUrl) => {
+    if (!imageUrl) return '';
+    
+    // 如果已经是完整URL，直接返回
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      return imageUrl;
+    }
+    
+    // 如果是相对路径，拼接API地址
+    if (imageUrl.startsWith('/api/')) {
+      return `${API_BASE_URL.replace('/api', '')}${imageUrl}`;
+    }
+    
+    // 默认返回原URL
+    return imageUrl;
+  };
+
+  // 渲染图片历史组件
+  const renderImageHistory = (images) => {
+    if (!images || images.length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: '16px', color: '#999' }}>
+          <span>📷</span>
+          <Text type="secondary"> 本次评估未使用图片</Text>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ margin: '12px 0' }}>
+        <Text strong style={{ color: '#1890ff', marginBottom: '8px', display: 'block' }}>
+          📸 上传图片 ({images.length}张)
+        </Text>
+        <div style={{ 
+          display: 'flex', 
+          flexWrap: 'wrap', 
+          gap: '8px',
+          maxHeight: '200px',
+          overflowY: 'auto',
+          padding: '8px',
+          backgroundColor: '#fafafa',
+          borderRadius: '6px',
+          border: '1px solid #d9d9d9'
+        }}>
+          {images.map((image, index) => (
+            <div key={image.id || index} style={{ position: 'relative' }}>
+              <Image
+                src={getImageUrl(image.previewUrl)}
+                alt={image.name}
+                width={80}
+                height={80}
+                style={{ 
+                  objectFit: 'cover',
+                  borderRadius: '4px',
+                  border: '1px solid #d9d9d9',
+                  cursor: 'pointer'
+                }}
+                preview={{
+                  src: getImageUrl(image.previewUrl),
+                  mask: (
+                    <div style={{ textAlign: 'center' }}>
+                      <EyeOutlined style={{ fontSize: '16px' }} />
+                      <br />
+                      <Text style={{ fontSize: '10px', color: 'white' }}>查看</Text>
+                    </div>
+                  )
+                }}
+              />
+              {image.ocrText && (
+                <Tooltip 
+                  title={
+                    <div>
+                      <Text strong style={{ color: '#fff' }}>OCR识别结果:</Text>
+                      <br />
+                      <Text style={{ color: '#fff' }}>
+                        {image.ocrText.length > 100 
+                          ? `${image.ocrText.substring(0, 100)}...` 
+                          : image.ocrText
+                        }
+                      </Text>
+                    </div>
+                  }
+                  placement="topLeft"
+                >
+                  <div style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    backgroundColor: '#52c41a',
+                    borderRadius: '50%',
+                    width: '16px',
+                    height: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '10px',
+                    color: 'white',
+                    border: '2px solid white',
+                    cursor: 'help'
+                  }}>
+                    ✓
+                  </div>
+                </Tooltip>
+              )}
+              <div style={{
+                position: 'absolute',
+                bottom: '2px',
+                left: '2px',
+                right: '2px',
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                color: 'white',
+                fontSize: '10px',
+                padding: '2px 4px',
+                borderRadius: '0 0 4px 4px',
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {image.name}
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        {/* 图片统计信息 */}
+        <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+          <Space split={<span>•</span>}>
+            <span>总计 {images.length} 张图片</span>
+            <span>已识别 {images.filter(img => img.ocrText).length} 张</span>
+            <span>总大小 {(images.reduce((sum, img) => sum + img.size, 0) / 1024 / 1024).toFixed(2)} MB</span>
+          </Space>
+        </div>
+      </div>
+    );
+  };
+
   // 渲染历史记录
   const renderHistoryModal = () => (
     <Modal
@@ -499,43 +1031,105 @@ ${dimensionRequirements}
           关闭
         </Button>
       ]}
-      width={800}
+      width={1000}
+      style={{ top: 20 }}
     >
       <List
         dataSource={history}
         renderItem={(item, index) => (
           <List.Item
+            style={{ 
+              padding: '16px',
+              border: '1px solid #f0f0f0',
+              borderRadius: '8px',
+              marginBottom: '12px',
+              background: '#fafafa'
+            }}
             actions={[
               <Button 
                 size="small" 
                 icon={<EyeOutlined />}
+                type="primary"
+                ghost
                 onClick={() => {
                   form.setFieldsValue({
                     userQuery: item.raw_response?.split('用户输入:')[1]?.split('模型回答:')[0]?.trim() || '',
                     modelResponse: item.raw_response?.split('模型回答:')[1]?.split('参考答案:')[0]?.trim() || '',
                     referenceAnswer: item.raw_response?.split('参考答案:')[1]?.trim() || ''
                   });
+                  
+                  // 恢复图片历史记录
+                  if (item.uploaded_images && item.uploaded_images.length > 0) {
+                    setUploadedImages(item.uploaded_images);
+                    message.info(`已恢复 ${item.uploaded_images.length} 张历史图片`);
+                  } else {
+                    setUploadedImages([]);
+                  }
+                  
                   setHistoryModalVisible(false);
                 }}
               >
-                查看
+                载入此记录
               </Button>
             ]}
           >
             <List.Item.Meta
               title={
-                <Space>
-                  <Text>评估 #{index + 1}</Text>
-                  <Tag color={getScoreLevel(item.score).color}>
-                    {item.score}/10 - {getScoreLevel(item.score).text}
-                  </Tag>
+                <Space align="start">
+                  <div>
+                    <Space>
+                      <Text strong>评估记录 #{index + 1}</Text>
+                      <Tag color={getScoreLevel(item.score).color}>
+                        {item.score}/10 - {getScoreLevel(item.score).text}
+                      </Tag>
+                    </Space>
+                    <div style={{ marginTop: '4px' }}>
+                      <Text type="secondary" style={{ fontSize: '12px' }}>
+                        {item.timestamp}
+                      </Text>
+                    </div>
+                  </div>
                 </Space>
               }
               description={
-                <div>
-                  <Text type="secondary">{item.timestamp}</Text>
-                  <br />
-                  <Text>{item.reasoning?.substring(0, 100)}...</Text>
+                <div style={{ marginTop: '8px' }}>
+                  {/* 评估理由摘要 */}
+                  <div style={{ marginBottom: '8px' }}>
+                    <Text>
+                      {item.reasoning?.substring(0, 150)}
+                      {item.reasoning && item.reasoning.length > 150 ? '...' : ''}
+                    </Text>
+                  </div>
+                  
+                  {/* 图片历史展示 */}
+                  {renderImageHistory(item.uploaded_images)}
+                  
+                  {/* 维度分数简要展示 */}
+                  {item.dimensions && Object.keys(item.dimensions).length > 0 && (
+                    <div style={{ marginTop: '8px' }}>
+                      <Text type="secondary" style={{ fontSize: '12px' }}>
+                        📊 维度得分: 
+                      </Text>
+                      <Space size="small" style={{ marginLeft: '8px' }}>
+                        {Object.entries(item.dimensions).map(([key, value]) => {
+                          const dimensionNames = {
+                            accuracy: '准确性',
+                            completeness: '完整性',
+                            fluency: '流畅性',
+                            safety: '安全性',
+                            relevance: '相关性',
+                            clarity: '清晰度'
+                          };
+                          const displayName = dimensionNames[key] || key;
+                          return (
+                            <Tag size="small" key={key} color="blue">
+                              {displayName}: {value}
+                            </Tag>
+                          );
+                        })}
+                      </Space>
+                    </div>
+                  )}
                 </div>
               }
             />
@@ -1279,27 +1873,285 @@ ${dimensionRequirements}
                       <Space>
                         <span style={{ fontWeight: 600, color: '#1890ff' }}>模型回答</span>
                         <Tag size="small" color="blue">必填</Tag>
+                        <Tag size="small" color="green" icon={<ScanOutlined />}>支持图片识别</Tag>
                       </Space>
                     }
                     rules={[{ required: true, message: '请输入模型回答' }]}
                   >
-                    <TextArea 
-                      rows={5} 
-                      placeholder="请输入待评估的模型回答内容..." 
-                      style={{
-                        borderRadius: '8px',
-                        border: '2px solid #f0f0f0',
-                        transition: 'all 0.3s ease'
-                      }}
-                      onFocus={(e) => {
-                        e.target.style.borderColor = '#1890ff';
-                        e.target.style.boxShadow = '0 0 0 2px rgba(24, 144, 255, 0.2)';
-                      }}
-                      onBlur={(e) => {
-                        e.target.style.borderColor = '#f0f0f0';
-                        e.target.style.boxShadow = 'none';
-                      }}
-                    />
+                    <div>
+                      {/* 图片上传区域 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <Space>
+                          <Upload
+                            accept=".png,.jpg,.jpeg,.gif,.bmp"
+                            beforeUpload={handleImageUpload}
+                            showUploadList={false}
+                            disabled={ocrLoading}
+                          >
+                            <Button
+                              icon={<PictureOutlined />}
+                              style={{
+                                borderRadius: '6px',
+                                border: '1px dashed #d9d9d9',
+                                background: '#fafafa'
+                              }}
+                              disabled={ocrLoading}
+                            >
+                              点击或拖拽上传图片
+                            </Button>
+                          </Upload>
+                          
+                          <Button
+                            size="small"
+                            type="link"
+                            onClick={async () => {
+                              message.loading('检测网络状态...', 1);
+                              try {
+                                const results = await testNetworkConnectivity();
+                                const accessibleCount = results.filter(r => r.status === 'accessible').length;
+                                const totalCount = results.length;
+                                
+                                if (accessibleCount === totalCount) {
+                                  message.success('✅ 网络连接良好，OCR功能正常');
+                                } else if (accessibleCount > 0) {
+                                  message.warning(`⚠️ 部分网络资源可访问 (${accessibleCount}/${totalCount})，可能影响OCR性能`);
+                                } else {
+                                  message.error('❌ 网络连接异常，OCR功能可能不可用');
+                                }
+                                
+                                console.log('🌐 网络检测结果:', results);
+                              } catch (error) {
+                                message.error('网络检测失败');
+                                console.error('网络检测错误:', error);
+                              }
+                            }}
+                            disabled={ocrLoading}
+                          >
+                            🌐 检测网络
+                          </Button>
+                          
+                          <Button
+                            size="small"
+                            type="link"
+                            onClick={async () => {
+                              const loadingMessage = message.loading('预加载OCR资源...', 0);
+                              try {
+                                const success = await preloadOCRResourcesFixed();
+                                loadingMessage();
+                                
+                                if (success) {
+                                  message.success('✅ OCR资源预加载成功！现在可以快速识别图片了');
+                                } else {
+                                  message.error('❌ OCR资源预加载失败，可能是网络问题');
+                                }
+                              } catch (error) {
+                                loadingMessage();
+                                message.error(`预加载失败: ${error.message}`);
+                                console.error('预加载错误:', error);
+                              }
+                            }}
+                            disabled={ocrLoading}
+                          >
+                            📦 预加载
+                          </Button>
+                          
+                          <Button
+                            size="small"
+                            type="link"
+                            onClick={async () => {
+                              const loadingMessage = message.loading('测试OCR功能...', 0);
+                              try {
+                                const result = await testOCRFunction();
+                                loadingMessage();
+                                
+                                if (result.success) {
+                                  message.success(`✅ OCR测试成功！识别时间: ${result.details.duration}ms`);
+                                  console.log('OCR测试详情:', result.details);
+                                } else {
+                                  message.error(`❌ OCR测试失败: ${result.message}`);
+                                }
+                              } catch (error) {
+                                loadingMessage();
+                                message.error(`测试失败: ${error.message}`);
+                                console.error('测试错误:', error);
+                              }
+                            }}
+                            disabled={ocrLoading}
+                          >
+                            🧪 测试
+                          </Button>
+                          
+                          <Button
+                            size="small"
+                            type="link"
+                            onClick={async () => {
+                              const testText = '这是一个测试文本，用于验证表单填入功能是否正常工作。';
+                              console.log('🔧 开始测试填入功能...');
+                              
+                              const success = await fillModelResponseText(testText);
+                              
+                              if (success) {
+                                message.success('✅ 填入测试成功！');
+                              } else {
+                                message.error('❌ 填入测试失败！');
+                              }
+                            }}
+                            disabled={ocrLoading}
+                          >
+                            🔧 测试填入
+                          </Button>
+                        </Space>
+                        
+                        <div style={{ marginTop: 4, color: '#666', fontSize: '12px' }}>
+                          支持PNG/JPG格式，大小不超过5MB • 如果OCR卡住，请先检测网络状态
+                        </div>
+                      </div>
+
+                      {/* 图片预览区域 */}
+                      {imagePreview && (
+                        <div style={{ 
+                          marginBottom: 12, 
+                          padding: '12px',
+                          border: '1px solid #d9d9d9',
+                          borderRadius: '6px',
+                          background: '#fafafa'
+                        }}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Space>
+                              <Tag color="blue">图片预览</Tag>
+                              <Button 
+                                size="small" 
+                                type="text" 
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={clearImage}
+                                disabled={ocrLoading}
+                              >
+                                清空
+                              </Button>
+                            </Space>
+                          </div>
+                          <Image
+                            src={imagePreview}
+                            alt="OCR识别图片"
+                            style={{ 
+                              maxWidth: '100%', 
+                              maxHeight: '200px',
+                              borderRadius: '4px'
+                            }}
+                            fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG8W+2V1JhQQzYEDHBOGGLkNHGBOOUEUKMLhD1YQhJW1YMcAV2gZLwBdgGBM4Y7QqKiQ3YCUNzFUtzuVJhw="
+                          />
+                        </div>
+                      )}
+
+                      {/* OCR识别进度 */}
+                      {ocrLoading && (
+                        <div style={{ 
+                          marginBottom: 12,
+                          padding: '12px',
+                          background: '#e6f7ff',
+                          border: '1px solid #91d5ff',
+                          borderRadius: '6px'
+                        }}>
+                          <Space direction="vertical" style={{ width: '100%' }}>
+                            <Space>
+                              <Spin size="small" />
+                              <span style={{ color: '#1890ff', fontWeight: 'bold' }}>
+                                {getOCRProgressText(ocrProgress)}
+                              </span>
+                              <Button 
+                                size="small" 
+                                type="text" 
+                                danger
+                                onClick={() => {
+                                  setOcrLoading(false);
+                                  setOcrProgress(0);
+                                  message.info('已取消OCR识别');
+                                }}
+                              >
+                                取消
+                              </Button>
+                            </Space>
+                            <Progress 
+                              percent={ocrProgress} 
+                              size="small"
+                              strokeColor={{
+                                '0%': '#108ee9',
+                                '100%': '#87d068',
+                              }}
+                            />
+                            {ocrProgress < 10 && (
+                              <div style={{ fontSize: '12px', color: '#666' }}>
+                                💡 首次使用需要下载语言包，请稍等片刻...
+                              </div>
+                            )}
+                          </Space>
+                        </div>
+                      )}
+
+                      {/* 文本输入框 - 添加强制刷新支持 */}
+                      <TextArea 
+                        key={`modelResponse-${forceRenderKey}`}
+                        rows={5} 
+                        placeholder="请输入待评估的模型回答内容，或粘贴图片进行OCR识别..." 
+                        value={modelResponseValue || form.getFieldValue('modelResponse') || ''}
+                        onChange={(e) => {
+                          const newValue = e.target.value;
+                          setModelResponseValue(newValue);
+                          form.setFieldsValue({ modelResponse: newValue });
+                        }}
+                        onPaste={handleTextAreaPaste}
+                        style={{
+                          borderRadius: '8px',
+                          border: '2px solid #f0f0f0',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onFocus={(e) => {
+                          e.target.style.borderColor = '#1890ff';
+                          e.target.style.boxShadow = '0 0 0 2px rgba(24, 144, 255, 0.2)';
+                        }}
+                        onBlur={(e) => {
+                          e.target.style.borderColor = '#f0f0f0';
+                          e.target.style.boxShadow = 'none';
+                        }}
+                      />
+                      
+                      {/* 当前会话图片历史展示 */}
+                      {uploadedImages.length > 0 && (
+                        <div style={{ marginTop: '12px' }}>
+                          <div style={{ 
+                            padding: '12px',
+                            border: '1px solid #e6f7ff',
+                            borderRadius: '6px',
+                            background: 'linear-gradient(135deg, #f6f9fc 0%, #ffffff 100%)'
+                          }}>
+                            <Text strong style={{ color: '#1890ff', marginBottom: '8px', display: 'block' }}>
+                              📷 本次评估已上传图片 ({uploadedImages.length}张)
+                            </Text>
+                            {renderImageHistory(uploadedImages)}
+                            <div style={{ marginTop: '8px', textAlign: 'right' }}>
+                              <Button 
+                                size="small" 
+                                type="text" 
+                                danger
+                                onClick={() => {
+                                  // 清理所有已上传的图片
+                                  uploadedImages.forEach(img => {
+                                    if (img.previewUrl) {
+                                      URL.revokeObjectURL(img.previewUrl);
+                                    }
+                                  });
+                                  setUploadedImages([]);
+                                  message.info('已清空所有上传图片');
+                                }}
+                              >
+                                清空所有图片
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </Form.Item>
                 </Col>
               </Row>

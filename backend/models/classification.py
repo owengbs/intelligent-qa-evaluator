@@ -191,6 +191,7 @@ class EvaluationHistory(db.Model):
     evaluation_time_seconds = db.Column(db.Float, comment='评估耗时(秒)')
     model_used = db.Column(db.String(100), comment='使用的模型')
     raw_response = db.Column(db.Text, comment='原始LLM响应')
+    uploaded_images_json = db.Column(db.Text, comment='上传的图片信息(JSON格式)')
     
     # 人工评估相关字段
     human_total_score = db.Column(db.Float, comment='人工修改后的总分')
@@ -219,6 +220,13 @@ class EvaluationHistory(db.Model):
             except (json.JSONDecodeError, TypeError):
                 human_dimensions = {}
         
+        uploaded_images = []
+        if self.uploaded_images_json:
+            try:
+                uploaded_images = json.loads(self.uploaded_images_json)
+            except (json.JSONDecodeError, TypeError):
+                uploaded_images = []
+        
         return {
             'id': self.id,
             'user_input': self.user_input,
@@ -235,6 +243,7 @@ class EvaluationHistory(db.Model):
             'evaluation_time_seconds': self.evaluation_time_seconds,
             'model_used': self.model_used,
             'raw_response': self.raw_response,
+            'uploaded_images': uploaded_images,
             
             # 人工评估字段
             'human_total_score': self.human_total_score,
@@ -260,6 +269,11 @@ class EvaluationHistory(db.Model):
         human_dimensions_json = None
         if 'human_dimensions' in data and data['human_dimensions']:
             human_dimensions_json = json.dumps(data['human_dimensions'], ensure_ascii=False)
+        
+        # 处理uploaded_images数据
+        uploaded_images_json = None
+        if 'uploaded_images' in data and data['uploaded_images']:
+            uploaded_images_json = json.dumps(data['uploaded_images'], ensure_ascii=False)
         
         # 处理question_time
         question_time = None
@@ -304,6 +318,7 @@ class EvaluationHistory(db.Model):
             evaluation_time_seconds=data.get('evaluation_time_seconds'),
             model_used=data.get('model_used'),
             raw_response=data.get('raw_response'),
+            uploaded_images_json=uploaded_images_json,
             
             # 人工评估字段
             human_total_score=data.get('human_total_score'),
