@@ -4,10 +4,6 @@ from flask_cors import CORS
 from datetime import datetime
 import logging
 import traceback
-from dotenv import load_dotenv
-
-# 加载环境变量
-load_dotenv()
 
 # 导入配置
 from config import config
@@ -22,24 +18,17 @@ from services.evaluation_standard_service import EvaluationStandardService
 from services.evaluation_history_service import EvaluationHistoryService
 from utils.logger import get_logger
 
-# 导入路由蓝图
-from routes.upload_routes import upload_bp
-from routes.evaluation_dimension_routes import evaluation_dimension_bp
-from routes.evaluation_standard_config_routes import evaluation_standard_config_bp
+# 获取环境变量
+env = os.environ.get('FLASK_ENV', 'development')
 
 # 创建Flask应用
 app = Flask(__name__)
 
-# 加载配置 - 直接使用config对象而不是config[env]
-app.config.from_object(config)
+# 加载配置
+app.config.from_object(config[env])
 
 # 启用CORS
 CORS(app)
-
-# 注册蓝图
-app.register_blueprint(upload_bp)
-app.register_blueprint(evaluation_dimension_bp)
-app.register_blueprint(evaluation_standard_config_bp)
 
 # 获取日志记录器
 logger = get_logger(__name__)
@@ -84,16 +73,6 @@ def health_check():
         'version': '2.1.0'
     })
 
-@app.route('/api/health', methods=['GET'])
-def api_health_check():
-    """API健康检查"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'version': '2.1.0',
-        'api_status': 'active'
-    })
-
 @app.route('/api/variable-info', methods=['GET'])
 def get_variable_info():
     """获取可用变量信息"""
@@ -124,44 +103,12 @@ def evaluate():
         question_time = data.get('question_time', datetime.now().isoformat())
         evaluation_criteria = data.get('evaluation_criteria', '请评估答案的准确性、相关性和有用性')
         scoring_prompt = data.get('scoring_prompt')  # 自定义的评分prompt
-        uploaded_images = data.get('uploaded_images', [])  # 上传的图片信息
         
-        logger.info(f"开始评估 - 用户问题长度: {len(user_input)}, 模型回答长度: {len(model_answer)}, 参考答案长度: {len(reference_answer)}, 问题时间: {question_time}, 评估标准长度: {len(evaluation_criteria)}, 图片数量: {len(uploaded_images)}")
+        logger.info(f"开始评估 - 用户问题长度: {len(user_input)}, 模型回答长度: {len(model_answer)}, 参考答案长度: {len(reference_answer)}, 问题时间: {question_time}, 评估标准长度: {len(evaluation_criteria)}")
         
         # 首先进行分类
         classification_result = classification_service.classify_user_input(user_input)
         logger.info(f"分类结果: {classification_result.get('level1', 'N/A')} -> {classification_result.get('level2', 'N/A')} -> {classification_result.get('level3', 'N/A')}")
-        
-        # 获取分类对应的新维度体系评估标准
-        new_evaluation_criteria = None
-        if classification_result and classification_result.get('level2'):
-            try:
-                import sys
-                import os
-                sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
-                from database_operations import db_ops
-                template_result = db_ops.format_for_evaluation_template(classification_result.get('level2'))
-                if template_result['success'] and template_result['data']:
-                    template_data = template_result['data']
-                    # 构建基于新维度体系的评估标准
-                    criteria_parts = []
-                    for dimension in template_data.get('dimensions', []):
-                        dim_name = dimension.get('name')
-                        reference_standard = dimension.get('reference_standard')
-                        scoring_principle = dimension.get('scoring_principle')
-                        max_score = dimension.get('max_score', 2)
-                        
-                        criteria_parts.append(f"{dim_name}（最高{max_score}分）：\n定义：{reference_standard}\n评分原则：{scoring_principle}")
-                    
-                    if criteria_parts:
-                        new_evaluation_criteria = "\n\n".join(criteria_parts)
-                        logger.info(f"使用新维度体系评估标准，包含 {len(template_data.get('dimensions', []))} 个维度")
-            except Exception as e:
-                logger.warning(f"获取新维度体系评估标准失败，将使用默认标准: {str(e)}")
-        
-        # 如果有新的评估标准，使用新标准；否则使用原评估标准
-        if new_evaluation_criteria:
-            evaluation_criteria = new_evaluation_criteria
         
         # 选择prompt模板：优先使用自定义的scoring_prompt，否则使用分类对应的prompt_template
         if scoring_prompt:
@@ -202,8 +149,7 @@ def evaluate():
                 'reasoning': result.get('reasoning'),
                 'evaluation_time_seconds': result.get('evaluation_time_seconds'),
                 'model_used': result.get('model_used'),
-                'raw_response': result.get('raw_response'),
-                'uploaded_images': uploaded_images  # 添加图片信息
+                'raw_response': result.get('raw_response')
             }
             
             # 保存到历史记录
@@ -466,22 +412,6 @@ def get_evaluation_template(category):
     try:
         logger.info(f"获取评估模板请求: {category}")
         
-        # 优先使用新的标准配置服务
-        try:
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
-            from database_operations import db_ops
-            result = db_ops.format_for_evaluation_template(category)
-            if result['success']:
-                logger.info(f"使用新标准配置获取评估模板成功: {category}")
-                return jsonify(result)
-            else:
-                logger.info(f"新标准配置未找到模板，尝试使用旧服务: {result.get('message', '')}")
-        except Exception as new_service_error:
-            logger.warning(f"新标准配置服务失败，回退到旧服务: {str(new_service_error)}")
-        
-        # 回退到原有的服务
         template = evaluation_standard_service.get_evaluation_template_by_category(category)
         
         if template:
@@ -534,15 +464,63 @@ def get_evaluation_history():
         return jsonify({'error': f'获取评估历史失败: {str(e)}'}), 500
 
 @app.route('/api/evaluation-history', methods=['POST'])
-def create_evaluation_history():
-    """保存评估历史记录"""
+def save_evaluation_history():
+    """保存评估历史记录（兼容前端重复保存调用）"""
     try:
-        logger.info("保存评估历史记录")
+        logger.info("前端尝试保存评估历史记录")
         
         data = request.get_json()
         
-        if not data:
-            return jsonify({'error': '缺少评估数据'}), 400
+        # 检查是否已经存在相同的记录（避免重复）
+        if data.get('user_input') and data.get('model_answer'):
+            existing = EvaluationHistory.query.filter_by(
+                user_input=data['user_input'],
+                model_answer=data['model_answer']
+            ).order_by(EvaluationHistory.created_at.desc()).first()
+            
+            # 如果最近2分钟内有相同记录，返回现有记录
+            if existing and (datetime.utcnow() - existing.created_at).seconds < 120:
+                logger.info(f"发现重复记录，返回现有记录ID: {existing.id}")
+                return jsonify({
+                    'success': True,
+                    'message': '记录已存在，返回现有记录',
+                    'history_id': existing.id,
+                    'data': existing.to_dict()
+                })
+        
+        # 调用服务保存记录
+        result = evaluation_history_service.save_evaluation_result(data)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"保存评估历史失败: {str(e)}")
+        return jsonify({'error': f'保存评估历史失败: {str(e)}'}), 500
+
+@app.route('/api/evaluation-history', methods=['POST'])
+def save_evaluation_history():
+    """保存评估历史记录（兼容前端重复保存调用）"""
+    try:
+        logger.info("前端尝试保存评估历史记录")
+        
+        data = request.get_json()
+        
+        # 检查是否已经存在相同的记录（避免重复）
+        if data.get('user_input') and data.get('model_answer'):
+            existing = EvaluationHistory.query.filter_by(
+                user_input=data['user_input'],
+                model_answer=data['model_answer']
+            ).order_by(EvaluationHistory.created_at.desc()).first()
+            
+            # 如果最近2分钟内有相同记录，返回现有记录
+            if existing and (datetime.utcnow() - existing.created_at).seconds < 120:
+                logger.info(f"发现重复记录，返回现有记录ID: {existing.id}")
+                return jsonify({
+                    'success': True,
+                    'message': '记录已存在，返回现有记录',
+                    'history_id': existing.id,
+                    'data': existing.to_dict()
+                })
         
         # 调用服务保存记录
         result = evaluation_history_service.save_evaluation_result(data)
@@ -639,78 +617,6 @@ def get_dimension_statistics():
 
 # ==================== 错误处理 ==================== 
 
-# ==================== 新增：标准配置管理API ==================== 
-
-@app.route('/api/standard-config', methods=['GET'])
-def get_all_category_standards():
-    """获取所有分类的标准配置"""
-    try:
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
-        from database_operations import db_ops
-        result = db_ops.get_all_category_standards()
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"获取标准配置失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'获取标准配置失败: {str(e)}'
-        }), 500
-
-@app.route('/api/standard-config/<category>', methods=['GET'])
-def get_category_standards(category):
-    """获取指定分类的标准配置"""
-    try:
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
-        from database_operations import db_ops
-        result = db_ops.get_category_standards(category)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"获取分类标准配置失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'获取分类标准配置失败: {str(e)}'
-        }), 500
-
-@app.route('/api/standard-config/<category>', methods=['POST'])
-def save_category_standards(category):
-    """保存指定分类的标准配置"""
-    try:
-        data = request.get_json()
-        if not data or 'dimension_ids' not in data:
-            return jsonify({
-                'success': False,
-                'message': '请提供dimension_ids参数'
-            }), 400
-        
-        dimension_ids = data['dimension_ids']
-        if not isinstance(dimension_ids, list):
-            return jsonify({
-                'success': False,
-                'message': 'dimension_ids必须是数组格式'
-            }), 400
-        
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
-        from database_operations import db_ops
-        result = db_ops.save_category_standards(category, dimension_ids)
-        
-        status_code = 200 if result['success'] else 500
-        return jsonify(result), status_code
-        
-    except Exception as e:
-        logger.error(f"保存分类标准配置失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'保存分类标准配置失败: {str(e)}'
-        }), 500
-
-# ==================== 错误处理 ==================== 
-
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'API接口不存在'}), 404
@@ -720,13 +626,5 @@ def internal_error(error):
     return jsonify({'error': '服务器内部错误'}), 500
 
 if __name__ == '__main__':
-    from config import config, print_config_info
-    
-    print_config_info()
-    logger.info(f"启动问答评估服务 - {config.ENVIRONMENT}环境...")
-    
-    app.run(
-        host=config.HOST, 
-        port=config.PORT, 
-        debug=config.DEBUG
-    ) 
+    logger.info("启动问答评估服务...")
+    app.run(host='0.0.0.0', port=5001, debug=True) 

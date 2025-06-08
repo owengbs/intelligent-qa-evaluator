@@ -225,55 +225,64 @@ class EvaluationService:
                         self.logger.debug(f"提取维度分数: {dimension_name} -> {dimension_key} = {score}")
                         break
         else:
-            # 回退到原有的固定模式匹配（向后兼容）
-            self.logger.info("未找到标准的各维度评分格式，尝试传统模式匹配")
-            traditional_patterns = {
-                'accuracy': r'准确性[：:]?\s*(\d+(?:\.\d+)?)',
-                'completeness': r'完整性[：:]?\s*(\d+(?:\.\d+)?)', 
-                'fluency': r'流畅性[：:]?\s*(\d+(?:\.\d+)?)',
-                'safety': r'安全性[：:]?\s*(\d+(?:\.\d+)?)',
-                'relevance': r'相关性[：:]?\s*(\d+(?:\.\d+)?)',
-                'clarity': r'清晰度[：:]?\s*(\d+(?:\.\d+)?)',
-                'timeliness': r'时效性[：:]?\s*(\d+(?:\.\d+)?)',
-                'usability': r'可用性[：:]?\s*(\d+(?:\.\d+)?)',
-                'compliance': r'合规性[：:]?\s*(\d+(?:\.\d+)?)'
+            # 回退到新维度体系的模式匹配
+            self.logger.info("未找到标准的各维度评分格式，尝试新维度体系模式匹配")
+            new_dimension_patterns = {
+                '数据准确性': [r'数据准确性[：:]?\s*(\d+(?:\.\d+)?)', r'准确性[：:]?\s*(\d+(?:\.\d+)?)'],
+                '数据时效性': [r'数据时效性[：:]?\s*(\d+(?:\.\d+)?)', r'时效性[：:]?\s*(\d+(?:\.\d+)?)'],
+                '内容完整性': [r'内容完整性[：:]?\s*(\d+(?:\.\d+)?)', r'完整性[：:]?\s*(\d+(?:\.\d+)?)'],
+                '用户视角': [r'用户视角[：:]?\s*(\d+(?:\.\d+)?)', r'用户体验[：:]?\s*(\d+(?:\.\d+)?)', r'清晰度[：:]?\s*(\d+(?:\.\d+)?)', r'可用性[：:]?\s*(\d+(?:\.\d+)?)']
             }
             
-            for dimension_key, pattern in traditional_patterns.items():
-                match = re.search(pattern, text)
-                if match:
-                    dimensions[dimension_key] = float(match.group(1))
-                    self.logger.debug(f"传统模式匹配维度: {dimension_key} = {match.group(1)}")
+            for dimension_name, patterns in new_dimension_patterns.items():
+                for pattern in patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        dimensions[dimension_name] = float(match.group(1))
+                        self.logger.debug(f"新维度体系匹配: {dimension_name} = {match.group(1)}")
+                        break  # 找到匹配就跳出内层循环
         
         self.logger.info(f"成功提取 {len(dimensions)} 个维度分数: {list(dimensions.keys())}")
         return dimensions
     
     def _normalize_dimension_name(self, dimension_name):
-        """标准化维度名称为英文key"""
-        # 中文到英文的映射表，支持更多维度
-        name_mapping = {
-            '准确性': 'accuracy',
-            '完整性': 'completeness',
-            '流畅性': 'fluency',
-            '安全性': 'safety',
-            '相关性': 'relevance',
-            '清晰度': 'clarity',
-            '时效性': 'timeliness',
-            '可用性': 'usability',
-            '合规性': 'compliance'
+        """标准化维度名称为新维度体系的名称"""
+        # 新维度体系的映射表，完全使用中文名称
+        new_dimension_mapping = {
+            '数据准确性': '数据准确性',
+            '数据时效性': '数据时效性', 
+            '内容完整性': '内容完整性',
+            '用户视角': '用户视角',
+            # 兼容旧维度名称到新维度的映射
+            '准确性': '数据准确性',
+            '时效性': '数据时效性',
+            '完整性': '内容完整性',
+            '用户体验': '用户视角',
+            '清晰度': '用户视角',
+            '可用性': '用户视角',
+            # 英文维度到新维度的映射
+            'accuracy': '数据准确性',
+            'timeliness': '数据时效性',
+            'completeness': '内容完整性',
+            'usability': '用户视角',
+            'clarity': '用户视角',
+            'user_experience': '用户视角'
         }
         
         # 移除可能的特殊字符和空格
         clean_name = dimension_name.strip('[](){}').strip()
         
         # 查找映射
-        if clean_name in name_mapping:
-            return name_mapping[clean_name]
+        if clean_name in new_dimension_mapping:
+            return new_dimension_mapping[clean_name]
         
-        # 如果没有找到映射，返回处理后的英文key（去除特殊字符，转小写）
-        import re
-        english_key = re.sub(r'[^a-zA-Z0-9_]', '', clean_name.lower())
-        return english_key if english_key else 'unknown_dimension'
+        # 模糊匹配（处理部分匹配的情况）
+        for key, value in new_dimension_mapping.items():
+            if key in clean_name or clean_name in key:
+                return value
+        
+        # 如果没有找到映射，直接返回原名称（保持中文）
+        return clean_name if clean_name else 'unknown_dimension'
 
     def evaluate_qa(self, user_input, model_answer, evaluation_criteria, question_time=None, prompt_template=None):
         """
@@ -343,9 +352,9 @@ class EvaluationService:
 
 严格评分要求：
 1. 严格按照上述评估标准进行评分，不得放宽标准
-2. 信息准确性要求极高，任何错误都应严重扣分
-3. 回答相关性必须很高，偏离主题应扣分
-4. 表达清晰度要求高，模糊表述应扣分
+2. 必须按照每个维度分别评分，然后计算总分
+3. 每个维度都要给出具体分数和理由
+4. 总分为各维度分数之和
 5. 评分应趋向保守，只有真正优秀的回答才能获得高分
 
 评估信息：
@@ -353,15 +362,20 @@ class EvaluationService:
 用户输入: {user_input}
 模型回答: {model_answer}
 
-评分指导原则：
-- 8-10分：仅给予信息完全准确、高度相关、表达清晰的优秀回答
-- 5-7分：基本合格但存在明显不足的回答
-- 2-4分：存在错误或质量较低的回答
-- 0-1分：严重错误或完全不合格的回答
+请严格按照以下格式返回评估结果，必须包含评估标准中的所有维度:
 
-请严格按照以下格式返回评估结果:
-总分: [分数]/10
-评分理由: [详细的评分分析，必须说明扣分理由，按照评估标准逐项说明问题]"""
+各维度评分:
+[请根据上述评估标准中的具体维度进行评分，每个维度都要有具体分数和理由]
+
+总分: [各维度分数之和]/10
+
+评分理由: [综合说明各维度的评分依据和总体评价]
+
+注意事项：
+1. 必须为评估标准中的每个维度都给出具体分数
+2. 分数必须在该维度的最大分数范围内
+3. 评分格式请使用：维度名称: [分数] 分 - [评分理由]
+4. 各维度分数相加即为总分"""
     
     def _replace_variables(self, template, variables):
         """替换模板中的变量"""

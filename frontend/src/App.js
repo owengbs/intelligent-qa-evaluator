@@ -7,7 +7,8 @@ import {
   HistoryOutlined,
   RobotOutlined,
   SettingOutlined,
-  TagsOutlined
+  TagsOutlined,
+  ControlOutlined
 } from '@ant-design/icons';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
@@ -16,6 +17,7 @@ import EvaluationHistory from './components/EvaluationHistory';
 import DimensionStatistics from './components/DimensionStatistics';
 import ClassificationConfig from './components/ClassificationConfig';
 import EvaluationStandardConfig from './components/EvaluationStandardConfig';
+import DimensionManagement from './components/DimensionManagement';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -57,6 +59,12 @@ function AppLayout() {
       icon: <SettingOutlined />,
       label: '评估标准',
       path: '/standards'
+    },
+    {
+      key: '6',
+      icon: <ControlOutlined />,
+      label: '维度管理',
+      path: '/dimensions'
     }
   ], []);
 
@@ -148,6 +156,7 @@ function AppLayout() {
               <Route path="/statistics" element={<DimensionStatistics />} />
               <Route path="/classification" element={<ClassificationConfig />} />
               <Route path="/standards" element={<EvaluationStandardConfig />} />
+              <Route path="/dimensions" element={<DimensionManagement />} />
             </Routes>
           </Content>
         </Layout>

@@ -478,17 +478,45 @@ const EvaluationForm = () => {
         const description = parts[1].trim();
         const scoringRule = parts[2].trim();
         
+        // 提取最大分数
+        let maxScore = 5; // 默认值
+        const scoreMatch = scoringRule.match(/(\d+)-(\d+)分|(\d+)分/);
+        if (scoreMatch) {
+          maxScore = parseInt(scoreMatch[2] || scoreMatch[3] || scoreMatch[1]);
+        }
+        
         dimensions.push({
           name: dimensionName,
           description: description,
-          scoringRule: scoringRule
+          scoringRule: scoringRule,
+          maxScore: maxScore
         });
       }
     });
 
-    // 生成维度评分要求
+    if (dimensions.length === 0) {
+      console.warn('未解析到维度信息，使用默认维度');
+      // 如果解析失败，使用默认维度
+      return `请根据以下详细的评估标准对回答质量进行严格评分：
+
+评估标准：
+{evaluation_criteria}
+
+请严格按照以下格式返回评估结果:
+总分: [分数]/10
+
+各维度评分:
+数据准确性: [分数] 分 - [评分理由]
+数据时效性: [分数] 分 - [评分理由]
+内容完整性: [分数] 分 - [评分理由]
+用户视角: [分数] 分 - [评分理由]
+
+评分理由: [详细的多行评分分析]`;
+    }
+
+    // 生成维度评分要求，明确格式
     const dimensionRequirements = dimensions.map(dim => 
-      `${dim.name}: [${dim.scoringRule}]`
+      `${dim.name}: [0-${dim.maxScore}分] - [评分理由]`
     ).join('\n');
 
     return `请根据以下详细的评估标准对回答质量进行严格评分：
@@ -510,24 +538,20 @@ const EvaluationForm = () => {
 模型回答: {model_answer}  
 参考答案: {reference_answer}
 
-评分指导原则：
-- 8-10分：仅给予信息准确、分析深入、表达清晰的优秀回答
-- 5-7分：基本合格但存在明显不足的回答
-- 2-4分：存在错误或质量较低的回答
-- 0-1分：严重错误或完全不合格的回答
+维度详细说明：
+${dimensions.map(dim => `• ${dim.name}（最高${dim.maxScore}分）：${dim.description}`).join('\n')}
 
 评估要求：
-1. 严格按照上述评估标准进行评分
-2. 特别注意问题提出时间 {question_time}，判断答案在当时是否准确
-3. 某些信息可能随时间变化，需要基于当时的情况进行评判
-4. 对于时间敏感的内容（如历史事件、政策法规、技术发展等）要格外注意
-5. 必须为每个评估维度提供具体分数
+1. 必须为以下每个维度都给出具体分数
+2. 分数必须在对应维度的最大分数范围内
+3. 按照标准格式输出，方便系统解析
 
-请严格按照以下格式返回评估结果:
-总分: [分数]/10
+请严格按照以下格式返回评估结果（重要：格式必须完全一致）:
 
 各维度评分:
 ${dimensionRequirements}
+
+总分: [各维度分数之和]/10
 
 评分理由: [详细的多行评分分析，必须说明扣分理由，按照评估标准逐项说明每个维度的评分理由和存在的问题，特别注明时间因素的考虑]`;
   };
@@ -611,31 +635,145 @@ ${dimensionRequirements}
     setUploadedImages([]); // 清理图片历史记录
   };
 
+  // 人工评估维度组件
+  const HumanEvaluationDimensions = ({ classification, result }) => {
+    const [dimensions, setDimensions] = React.useState([]);
+    const [loading, setLoading] = React.useState(true);
+    
+    React.useEffect(() => {
+      const fetchDimensions = async () => {
+        if (!classification || !classification.level2) {
+          setLoading(false);
+          return;
+        }
+        
+        try {
+          // 使用评估模板API获取新维度体系
+          const templateResponse = await api.get(`/evaluation-template/${classification.level2}`);
+          if (templateResponse.data.success && templateResponse.data.data) {
+            const templateData = templateResponse.data.data;
+            setDimensions(templateData.dimensions || []);
+          } else {
+            setDimensions([]);
+          }
+        } catch (error) {
+          console.error('获取维度标准失败:', error);
+          message.error('获取维度标准失败');
+          setDimensions([]);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      fetchDimensions();
+    }, [classification]);
+    
+    if (loading) {
+      return <Spin tip="加载维度信息..." />;
+    }
+    
+    if (dimensions.length === 0) {
+      return (
+        <Alert
+          type="warning"
+          message="暂无维度配置"
+          description={`当前分类「${classification?.level2 || '未知'}」尚未配置评估维度，请先在标准配置页面进行配置。`}
+        />
+      );
+    }
+    
+    return (
+      <>
+        <Divider orientation="left">各维度分数调整</Divider>
+        <Row gutter={[16, 16]}>
+          {dimensions.map((dimension) => {
+            // 获取AI评分（如果有的话）
+            const aiScore = result.dimensions && result.dimensions[dimension.name] 
+              ? result.dimensions[dimension.name] 
+              : 0;
+            
+            // 使用新维度体系的最大分数
+            const maxScore = dimension.max_score || 2;
+            
+            return (
+              <Col span={8} key={dimension.name}>
+                <Form.Item
+                  label={
+                    <Tooltip title={`${dimension.reference_standard}\n\n评分原则：${dimension.scoring_principle}`}>
+                      {dimension.name} (AI评分: {aiScore}/{maxScore})
+                    </Tooltip>
+                  }
+                  name={`dimension_${dimension.name}`}
+                  rules={[
+                    { required: true, message: `请输入${dimension.name}分数` },
+                    { type: 'number', min: 0, max: maxScore, message: `分数应在0-${maxScore}之间` }
+                  ]}
+                >
+                  <InputNumber 
+                    step={0.1} 
+                    min={0} 
+                    max={maxScore} 
+                    placeholder={`0-${maxScore}分`}
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+              </Col>
+            );
+          })}
+        </Row>
+      </>
+    );
+  };
+
   // 人工评估相关函数
-  const handleHumanEvaluation = () => {
+  const handleHumanEvaluation = async () => {
     if (!result || !result.history_id) {
       message.error('无法获取评估记录ID，请重新评估');
       return;
     }
     
-    setCurrentHistoryId(result.history_id);
-    
-    // 初始化人工评估表单，填入当前AI评估结果
-    const initialValues = {
-      human_total_score: result.score,
-      human_reasoning: '',
-      evaluator_name: '评估专家'
-    };
-    
-    // 初始化各维度分数
-    if (result.dimensions) {
-      Object.entries(result.dimensions).forEach(([key, value]) => {
-        initialValues[`dimension_${key}`] = value;
-      });
+    if (!classification || !classification.level2) {
+      message.error('无法获取分类信息，请重新分类');
+      return;
     }
     
-    humanForm.setFieldsValue(initialValues);
-    setHumanEvaluationVisible(true);
+    setCurrentHistoryId(result.history_id);
+    
+    try {
+      // 获取当前分类的评估模板（新维度体系）
+      const templateResponse = await api.get(`/evaluation-template/${classification.level2}`);
+      
+      if (!templateResponse.data.success || !templateResponse.data.data) {
+        message.error('该分类暂无配置的评估维度');
+        return;
+      }
+      
+      const templateData = templateResponse.data.data;
+      const dimensions = templateData.dimensions || [];
+      
+      // 初始化人工评估表单
+      const initialValues = {
+        human_total_score: result.score,
+        human_reasoning: '',
+        evaluator_name: '评估专家'
+      };
+      
+      // 为每个维度初始化分数
+      dimensions.forEach((dimension) => {
+        // 优先使用AI评估结果，如果没有则使用0
+        const aiScore = result.dimensions && result.dimensions[dimension.name] 
+          ? result.dimensions[dimension.name] 
+          : 0;
+        initialValues[`dimension_${dimension.name}`] = aiScore;
+      });
+      
+      humanForm.setFieldsValue(initialValues);
+      setHumanEvaluationVisible(true);
+      
+    } catch (error) {
+      console.error('获取评估模板失败:', error);
+      message.error('获取评估标准失败，请重试');
+    }
   };
 
   const handleHumanEvaluationSubmit = async () => {
@@ -773,52 +911,11 @@ ${dimensionRequirements}
             </Col>
           </Row>
           
-          {/* 各维度分数调整 */}
-          {result.dimensions && Object.keys(result.dimensions).length > 0 && (
-            <>
-              <Divider orientation="left">各维度分数调整</Divider>
-              <Row gutter={[16, 16]}>
-                {Object.entries(result.dimensions).map(([key, value]) => {
-                  const dimensionNames = {
-                    accuracy: '准确性',
-                    completeness: '完整性',
-                    fluency: '流畅性',
-                    safety: '安全性',
-                    relevance: '相关性',
-                    clarity: '清晰度',
-                    timeliness: '时效性',
-                    usability: '可用性',
-                    compliance: '合规性'
-                  };
-                  
-                  const criteriaText = form.getFieldValue('evaluationCriteria') || '';
-                  const maxScore = getDimensionMaxScore(key, criteriaText);
-                  const displayName = dimensionNames[key] || key.charAt(0).toUpperCase() + key.slice(1);
-                  
-                  return (
-                    <Col span={8} key={key}>
-                      <Form.Item
-                        label={`${displayName} (AI评分: ${value}/${maxScore})`}
-                        name={`dimension_${key}`}
-                        rules={[
-                          { required: true, message: `请输入${displayName}分数` },
-                          { type: 'number', min: 0, max: maxScore, message: `分数应在0-${maxScore}之间` }
-                        ]}
-                      >
-                        <InputNumber 
-                          step={0.1} 
-                          min={0} 
-                          max={maxScore} 
-                          placeholder={`0-${maxScore}分`}
-                          style={{ width: '100%' }}
-                        />
-                      </Form.Item>
-                    </Col>
-                  );
-                })}
-              </Row>
-            </>
-          )}
+          {/* 各维度分数调整 - 基于新的维度体系 */}
+          <HumanEvaluationDimensions 
+            classification={classification}
+            result={result}
+          />
           
           <Form.Item
             label="人工评估意见"
@@ -1112,15 +1209,8 @@ ${dimensionRequirements}
                       </Text>
                       <Space size="small" style={{ marginLeft: '8px' }}>
                         {Object.entries(item.dimensions).map(([key, value]) => {
-                          const dimensionNames = {
-                            accuracy: '准确性',
-                            completeness: '完整性',
-                            fluency: '流畅性',
-                            safety: '安全性',
-                            relevance: '相关性',
-                            clarity: '清晰度'
-                          };
-                          const displayName = dimensionNames[key] || key;
+                          // 使用动态维度名称获取函数
+                          const displayName = getDimensionDisplayName(key, item.evaluation_criteria || '');
                           return (
                             <Tag size="small" key={key} color="blue">
                               {displayName}: {value}
@@ -1548,9 +1638,54 @@ ${dimensionRequirements}
   const formatEvaluationCriteria = (template) => {
     if (!template || !template.dimensions) return '';
     
-    return template.dimensions
+    // 创建更友好的格式化文本，同时保持tab分隔的兼容性
+    const formattedLines = template.dimensions.map(dimension => {
+      // 基本信息行
+      const basicInfo = `${dimension.name}\t${dimension.reference_standard}\t${dimension.scoring_principle}`;
+      
+      // 添加友好的显示格式
+      const friendlyFormat = `
+📊 维度名称：${dimension.name} (最高${dimension.max_score}分)
+📋 参考标准：${dimension.reference_standard}
+⚖️  评分原则：${dimension.scoring_principle}
+
+具体评分等级：`;
+      
+      // 添加具体的评分等级
+      let criteriaDetails = '';
+      if (dimension.evaluation_criteria && Array.isArray(dimension.evaluation_criteria)) {
+        criteriaDetails = dimension.evaluation_criteria
+          .sort((a, b) => b.score - a.score) // 按分数降序排列
+          .map(criteria => `  • ${criteria.level} (${criteria.score}分)：${criteria.description}`)
+          .join('\n');
+      }
+      
+      return basicInfo + '\n' + friendlyFormat + '\n' + criteriaDetails;
+    });
+    
+    // 创建完整的友好格式
+    const friendlyHeader = `🎯 评估标准配置 (总分：${template.total_max_score}分)
+📝 分类：${template.level2_category}
+⏰ 更新时间：${new Date().toLocaleString()}
+
+═══════════════════════════════════════════`;
+    
+    const basicTabFormat = template.dimensions
       .map(dimension => `${dimension.name}\t${dimension.reference_standard}\t${dimension.scoring_principle}`)
       .join('\n');
+    
+    const friendlyFullFormat = friendlyHeader + '\n\n' + formattedLines.join('\n\n─────────────────────────────────────────\n\n');
+    
+    // 将完整的template数据存储到form中，供人工评估时使用
+    setTimeout(() => {
+      form.setFieldsValue({
+        evaluationTemplate: JSON.stringify(template),
+        evaluationCriteriaFriendly: friendlyFullFormat
+      });
+    }, 0);
+    
+    // 返回tab分隔格式供AI评估使用
+    return basicTabFormat;
   };
 
   // 监听用户输入变化，触发自动分类
@@ -1695,6 +1830,25 @@ ${dimensionRequirements}
 
   // 解析评估标准获取各维度最大分数
   const parseEvaluationCriteria = (criteriaText) => {
+    if (!criteriaText) return {};
+    
+    // 首先尝试解析JSON格式（新的标准配置格式）
+    try {
+      const parsed = JSON.parse(criteriaText);
+      if (parsed.dimensions && Array.isArray(parsed.dimensions)) {
+        const criteriaMap = {};
+        parsed.dimensions.forEach(dimension => {
+          if (dimension.name && dimension.max_score) {
+            criteriaMap[dimension.name] = dimension.max_score;
+          }
+        });
+        return criteriaMap;
+      }
+    } catch (e) {
+      // 如果不是JSON格式，继续用原来的tab分割方式解析
+    }
+    
+    // 原有的tab分割格式解析
     const lines = criteriaText.split('\n').filter(line => line.trim());
     const criteriaMap = {};
     
@@ -1714,6 +1868,40 @@ ${dimensionRequirements}
     });
     
     return criteriaMap;
+  };
+
+  // 获取维度显示名称
+  const getDimensionDisplayName = (dimensionKey, criteriaText) => {
+    // 首先尝试从评估标准中解析维度名称
+    const lines = criteriaText.split('\n').filter(line => line.trim());
+    
+    for (const line of lines) {
+      const parts = line.split('\t');
+      if (parts.length >= 1) {
+        const dimensionName = parts[0].trim();
+        // 检查是否匹配当前维度key（支持多种匹配方式）
+        if (dimensionName.toLowerCase() === dimensionKey.toLowerCase() ||
+            dimensionKey.toLowerCase().includes(dimensionName.toLowerCase()) ||
+            dimensionName.toLowerCase().includes(dimensionKey.toLowerCase())) {
+          return dimensionName;
+        }
+      }
+    }
+    
+    // 回退到旧的硬编码映射
+    const dimensionNames = {
+      accuracy: '准确性',
+      completeness: '完整性',
+      fluency: '流畅性',
+      safety: '安全性',
+      relevance: '相关性',
+      clarity: '清晰度',
+      timeliness: '时效性',
+      usability: '可用性',
+      compliance: '合规性'
+    };
+    
+    return dimensionNames[dimensionKey] || dimensionKey.charAt(0).toUpperCase() + dimensionKey.slice(1);
   };
 
   // 获取维度对应的最大分数

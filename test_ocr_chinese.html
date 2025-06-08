@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中文OCR测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .upload-area {
+            border: 2px dashed #d9d9d9;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #1890ff;
+        }
+        .upload-area.dragover {
+            border-color: #1890ff;
+            background: #e6f7ff;
+        }
+        button {
+            background: #1890ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #40a9ff;
+        }
+        button:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
+        }
+        .result-area {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background: #f8f8f8;
+            min-height: 100px;
+            white-space: pre-wrap;
+        }
+        .progress {
+            margin: 10px 0;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #1890ff, #40a9ff);
+            transition: width 0.3s;
+            border-radius: 10px;
+        }
+        .samples {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .sample-img {
+            width: 150px;
+            height: 100px;
+            object-fit: cover;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .sample-img:hover {
+            border-color: #1890ff;
+        }
+        .log {
+            background: #f8f8f8;
+            border: 1px solid #d9d9d9;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 中文OCR识别测试</h1>
+        <p>测试Tesseract.js的中英文混合识别能力</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <div>📄 拖拽图片到此处或点击上传</div>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                支持PNG、JPG格式，建议图片清晰，文字对比度高
+            </div>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+        </div>
+        
+        <div>
+            <button onclick="preloadResources()" id="preloadBtn">📦 预加载资源</button>
+            <button onclick="testChinese()" id="testChineseBtn">🇨🇳 测试中文识别</button>
+            <button onclick="testEnglish()" id="testEnglishBtn">🇺🇸 测试英文识别</button>
+            <button onclick="clearResult()" id="clearBtn">🗑️ 清空结果</button>
+        </div>
+        
+        <div id="progressContainer" style="display: none;">
+            <div>识别进度：<span id="progressText">0%</span></div>
+            <div class="progress">
+                <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <h3>📄 识别结果</h3>
+        <div class="result-area" id="resultArea">等待上传图片...</div>
+        
+        <h3>📋 测试样本</h3>
+        <div class="samples">
+            <canvas id="chineseSample" class="sample-img" onclick="useChineseSample()"></canvas>
+            <canvas id="englishSample" class="sample-img" onclick="useEnglishSample()"></canvas>
+            <canvas id="mixedSample" class="sample-img" onclick="useMixedSample()"></canvas>
+        </div>
+        
+        <h3>📝 操作日志</h3>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script src="https://unpkg.com/tesseract.js@4.1.4/dist/tesseract.min.js"></script>
+    <script>
+        let currentFile = null;
+        let isProcessing = false;
+        
+        // 日志功能
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `${timestamp}: ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(message);
+        }
+        
+        // 更新进度
+        function updateProgress(progress, text = '') {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            
+            if (progress > 0) {
+                progressContainer.style.display = 'block';
+                progressBar.style.width = progress + '%';
+                progressText.textContent = text || `${progress}%`;
+            } else {
+                progressContainer.style.display = 'none';
+            }
+        }
+        
+        // 文件上传处理
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+        
+        // 处理文件
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                log('❌ 请选择图片文件');
+                return;
+            }
+            
+            currentFile = file;
+            log(`📁 已选择文件: ${file.name} (${(file.size/1024).toFixed(1)}KB)`);
+            
+            // 显示图片预览
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const resultArea = document.getElementById('resultArea');
+                resultArea.innerHTML = `<img src="${e.target.result}" style="max-width: 100%; height: auto; margin-bottom: 10px;"><br>图片已加载，点击识别按钮开始...`;
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        // 预加载资源
+        async function preloadResources() {
+            if (isProcessing) return;
+            
+            const btn = document.getElementById('preloadBtn');
+            btn.disabled = true;
+            btn.textContent = '📦 预加载中...';
+            
+            try {
+                log('🚀 开始预加载OCR资源...');
+                updateProgress(10, '创建测试图片...');
+                
+                // 创建测试图片
+                const canvas = document.createElement('canvas');
+                canvas.width = 100;
+                canvas.height = 30;
+                const ctx = canvas.getContext('2d');
+                
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, 100, 30);
+                ctx.fillStyle = 'black';
+                ctx.font = '16px Arial';
+                ctx.fillText('Test', 10, 20);
+                
+                updateProgress(30, '转换图片格式...');
+                
+                const blob = await new Promise(resolve => {
+                    canvas.toBlob(resolve);
+                });
+                
+                updateProgress(50, '加载OCR引擎...');
+                
+                // 预加载英文
+                await Tesseract.recognize(blob, 'eng');
+                
+                updateProgress(100, '预加载完成');
+                
+                log('✅ OCR资源预加载成功！');
+                
+            } catch (error) {
+                log(`❌ 预加载失败: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📦 预加载资源';
+                setTimeout(() => updateProgress(0), 2000);
+            }
+        }
+        
+        // 测试中文识别
+        async function testChinese() {
+            if (!currentFile) {
+                log('⚠️ 请先选择图片文件');
+                return;
+            }
+            
+            await performOCR(currentFile, 'chi_sim+eng', '中英文混合');
+        }
+        
+        // 测试英文识别
+        async function testEnglish() {
+            if (!currentFile) {
+                log('⚠️ 请先选择图片文件');
+                return;
+            }
+            
+            await performOCR(currentFile, 'eng', '英文');
+        }
+        
+        // 执行OCR识别
+        async function performOCR(file, language, modeName) {
+            if (isProcessing) return;
+            
+            isProcessing = true;
+            log(`🔍 开始${modeName}OCR识别...`);
+            updateProgress(5, '初始化...');
+            
+            try {
+                const startTime = Date.now();
+                
+                const { data: { text, confidence } } = await Tesseract.recognize(file, language, {
+                    logger: m => {
+                        if (m.status && typeof m.progress === 'number') {
+                            const progress = Math.round(m.progress * 100);
+                            updateProgress(progress, m.status);
+                            log(`📈 ${m.status}: ${progress}%`);
+                        }
+                    }
+                });
+                
+                const endTime = Date.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(1);
+                
+                // 清理文本
+                const cleanedText = cleanText(text);
+                
+                // 显示结果
+                const resultArea = document.getElementById('resultArea');
+                resultArea.textContent = cleanedText || '(未识别到文字)';
+                
+                log(`✅ ${modeName}识别完成!`);
+                log(`📊 识别时间: ${duration}秒`);
+                log(`📊 置信度: ${confidence}%`);
+                log(`📊 字符数: ${cleanedText.length}`);
+                log(`📄 结果: ${cleanedText}`);
+                
+                updateProgress(100, '识别完成');
+                
+            } catch (error) {
+                log(`❌ ${modeName}识别失败: ${error.message}`);
+                const resultArea = document.getElementById('resultArea');
+                resultArea.textContent = `识别失败: ${error.message}`;
+            } finally {
+                isProcessing = false;
+                setTimeout(() => updateProgress(0), 3000);
+            }
+        }
+        
+        // 文本清理
+        function cleanText(text) {
+            if (!text) return '';
+            
+            return text
+                .replace(/\s+/g, ' ')
+                .replace(/^\s+|\s+$/gm, '')
+                .replace(/\n\s*\n/g, '\n')
+                .trim();
+        }
+        
+        // 清空结果
+        function clearResult() {
+            document.getElementById('resultArea').textContent = '等待上传图片...';
+            document.getElementById('log').innerHTML = '';
+            currentFile = null;
+            log('🗑️ 已清空结果');
+        }
+        
+        // 创建测试样本
+        function createChineseSample() {
+            const canvas = document.getElementById('chineseSample');
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, 150, 100);
+            ctx.fillStyle = 'black';
+            ctx.font = '16px SimHei';
+            ctx.fillText('你好世界', 20, 30);
+            ctx.fillText('测试中文识别', 10, 50);
+            ctx.fillText('Hello World', 15, 70);
+        }
+        
+        function createEnglishSample() {
+            const canvas = document.getElementById('englishSample');
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, 150, 100);
+            ctx.fillStyle = 'black';
+            ctx.font = '14px Arial';
+            ctx.fillText('Hello World', 20, 25);
+            ctx.fillText('Test OCR', 30, 45);
+            ctx.fillText('Recognition', 25, 65);
+            ctx.fillText('English Text', 20, 85);
+        }
+        
+        function createMixedSample() {
+            const canvas = document.getElementById('mixedSample');
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, 150, 100);
+            ctx.fillStyle = 'black';
+            ctx.font = '12px Arial';
+            ctx.fillText('混合文本 Mixed', 10, 20);
+            ctx.fillText('中文 Chinese', 15, 35);
+            ctx.fillText('English 英文', 15, 50);
+            ctx.fillText('123 数字 ABC', 15, 65);
+            ctx.fillText('测试 Test', 30, 80);
+        }
+        
+        // 使用样本
+        function useChineseSample() {
+            const canvas = document.getElementById('chineseSample');
+            canvas.toBlob(blob => {
+                const file = new File([blob], 'chinese_sample.png', { type: 'image/png' });
+                handleFile(file);
+            });
+        }
+        
+        function useEnglishSample() {
+            const canvas = document.getElementById('englishSample');
+            canvas.toBlob(blob => {
+                const file = new File([blob], 'english_sample.png', { type: 'image/png' });
+                handleFile(file);
+            });
+        }
+        
+        function useMixedSample() {
+            const canvas = document.getElementById('mixedSample');
+            canvas.toBlob(blob => {
+                const file = new File([blob], 'mixed_sample.png', { type: 'image/png' });
+                handleFile(file);
+            });
+        }
+        
+        // 页面加载完成后初始化
+        window.onload = function() {
+            createChineseSample();
+            createEnglishSample();
+            createMixedSample();
+            
+            log('🎉 中文OCR测试页面已加载');
+            log('💡 使用说明:');
+            log('1. 点击"预加载资源"下载语言包');
+            log('2. 上传图片或使用测试样本');
+            log('3. 选择识别模式进行测试');
+        };
+    </script>
+</body>
+</html> 

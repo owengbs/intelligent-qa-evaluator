@@ -105,10 +105,22 @@ fi
 echo "🔍 检查serve包..."
 if ! npx serve --version &> /dev/null; then
     echo "📦 安装serve包..."
-    npm install -g serve || {
+    # 尝试使用--force参数覆盖已存在的文件
+    npm install -g serve --force || {
         echo "⚠️  全局安装失败，尝试本地安装..."
-        npm install serve --save-dev
+        npm install serve --save-dev --force || {
+            echo "⚠️  本地安装也失败，尝试清理并重新安装..."
+            # 清理可能冲突的文件
+            if [ -f "/usr/local/bin/serve" ]; then
+                echo "🧹 清理已存在的serve文件..."
+                sudo rm -f /usr/local/bin/serve 2>/dev/null || true
+            fi
+            # 重新尝试安装
+            npm install -g serve || npm install serve --save-dev
+        }
     }
+else
+    echo "✅ serve包已可用"
 fi
 
 # 清理之前的构建

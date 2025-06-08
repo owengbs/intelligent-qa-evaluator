@@ -6,11 +6,8 @@ import {
   Button,
   Modal,
   Form,
-  Input,
-  InputNumber,
-  Select,
+  Checkbox,
   message,
-  Popconfirm,
   Space,
   Tag,
   Typography,
@@ -18,16 +15,20 @@ import {
   Col,
   Statistic,
   Alert,
-  Tooltip
+  Tooltip,
+  Collapse,
+  Badge,
+  Empty,
+  Divider
 } from 'antd';
 import {
-  PlusOutlined,
+  CheckOutlined,
   EditOutlined,
-  DeleteOutlined,
   ReloadOutlined,
   InfoCircleOutlined,
   CheckCircleOutlined,
-  WarningOutlined
+  WarningOutlined,
+  EyeOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -42,17 +43,18 @@ const api = axios.create({
 });
 
 const { TabPane } = Tabs;
-const { TextArea } = Input;
-const { Option } = Select;
 const { Title, Text, Paragraph } = Typography;
+const { Panel } = Collapse;
 
 const EvaluationStandardConfig = () => {
   const [loading, setLoading] = useState(false);
-  const [groupedStandards, setGroupedStandards] = useState({});
+  const [dimensions, setDimensions] = useState([]);
+  const [groupedDimensions, setGroupedDimensions] = useState({});
+  const [selectedStandards, setSelectedStandards] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingStandard, setEditingStandard] = useState(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [viewingDimension, setViewingDimension] = useState(null);
   const [activeTab, setActiveTab] = useState('选股');
-  const [form] = Form.useForm();
 
   // 二级分类选项
   const categoryOptions = [
@@ -65,119 +67,239 @@ const EvaluationStandardConfig = () => {
     '无效问题'
   ];
 
-  // 加载评估标准
-  const loadEvaluationStandards = useCallback(async () => {
+  // 层次选项
+  const layerOptions = [
+    '第一层指标',
+    '第二层指标', 
+    '第三层指标',
+    '其他服务场景'
+  ];
+
+  // 加载所有维度数据
+  const loadDimensions = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.get('/evaluation-standards/grouped');
+      console.log('🔧 Loading dimensions from:', `${API_BASE_URL}/dimensions`);
+      
+      const response = await api.get('/dimensions');
       if (response.data.success) {
-        setGroupedStandards(response.data.data);
+        const dimensionsData = response.data.data;
+        setDimensions(dimensionsData);
         
-        // 如果当前活动标签页没有数据，切换到第一个有数据的标签页
-        if (!response.data.data[activeTab] && response.data.categories.length > 0) {
-          setActiveTab(response.data.categories[0]);
-        }
+        // 按层次分组
+        const grouped = dimensionsData.reduce((acc, dimension) => {
+          const layer = dimension.layer || '其他';
+          if (!acc[layer]) {
+            acc[layer] = [];
+          }
+          acc[layer].push(dimension);
+          return acc;
+        }, {});
+        
+        setGroupedDimensions(grouped);
+        console.log('🔧 Dimensions loaded successfully:', grouped);
+      } else {
+        message.error('加载维度数据失败');
       }
     } catch (error) {
-      console.error('加载评估标准失败:', error);
-      message.error('加载评估标准失败');
+      console.error('加载维度数据失败:', error);
+      message.error('加载维度数据失败: ' + error.message);
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, []);
+
+  // 加载已选择的标准配置
+  const loadSelectedStandards = useCallback(async () => {
+    try {
+      console.log('🔧 Loading selected standards from:', `${API_BASE_URL}/standard-config`);
+      const response = await api.get('/standard-config');
+      
+      if (response.data.success) {
+        const allCategoryStandards = response.data.data;
+        console.log('🔧 Loaded category standards:', allCategoryStandards);
+        
+        // 将所有分类的标准合并到一个数组中
+        const allStandards = [];
+        Object.keys(allCategoryStandards).forEach(category => {
+          const categoryStandards = allCategoryStandards[category] || [];
+          categoryStandards.forEach(standard => {
+            allStandards.push({
+              ...standard,
+              category: category // 确保有分类信息
+            });
+          });
+        });
+        
+        setSelectedStandards(allStandards);
+        console.log('🔧 All selected standards loaded:', allStandards);
+      } else {
+        console.warn('加载已选择标准失败:', response.data.message);
+        setSelectedStandards([]);
+      }
+    } catch (error) {
+      console.error('加载已选择标准失败:', error);
+      setSelectedStandards([]);
+    }
+  }, []);
 
   useEffect(() => {
-    loadEvaluationStandards();
-  }, [loadEvaluationStandards]);
+    loadDimensions();
+    loadSelectedStandards();
+  }, [loadDimensions, loadSelectedStandards]);
 
-  // 显示新增/编辑模态框
-  const showModal = (standard = null) => {
-    setEditingStandard(standard);
+  // 显示选择标准模态框
+  const showSelectModal = () => {
     setModalVisible(true);
-    
-    if (standard) {
-      form.setFieldsValue(standard);
-    } else {
-      form.resetFields();
-      form.setFieldsValue({
-        level2_category: activeTab,
-        max_score: 3
-      });
-    }
   };
 
-  // 隐藏模态框
-  const hideModal = () => {
+  // 隐藏选择标准模态框
+  const hideSelectModal = () => {
     setModalVisible(false);
-    setEditingStandard(null);
-    form.resetFields();
   };
 
-  // 保存评估标准
-  const handleSave = async () => {
+  // 查看维度详情
+  const showDetailModal = (dimension) => {
+    setViewingDimension(dimension);
+    setDetailModalVisible(true);
+  };
+
+  // 隐藏详情模态框
+  const hideDetailModal = () => {
+    setDetailModalVisible(false);
+    setViewingDimension(null);
+  };
+
+  // 处理标准选择
+  const handleStandardSelection = (checkedValues, layer) => {
+    const newSelected = selectedStandards.filter(item => item.layer !== layer);
+    const layerDimensions = groupedDimensions[layer] || [];
+    
+    checkedValues.forEach(dimensionId => {
+      const dimension = layerDimensions.find(d => d.id === dimensionId);
+      if (dimension) {
+        newSelected.push({
+          ...dimension,
+          category: activeTab // 记录选择时的分类
+        });
+      }
+    });
+    
+    setSelectedStandards(newSelected);
+  };
+
+  // 保存选择的标准
+  const handleSaveSelection = async () => {
     try {
-      const values = await form.validateFields();
+      // 获取当前分类的已选择维度ID
+      const currentCategoryStandards = selectedStandards.filter(s => s.category === activeTab);
+      const dimensionIds = currentCategoryStandards.map(s => s.id);
       
-      if (editingStandard) {
-        // 更新现有标准
-        await api.put(`/evaluation-standards/${editingStandard.id}`, values);
-        message.success('评估标准更新成功');
+      console.log('🔧 Saving standards for category:', activeTab, 'dimension_ids:', dimensionIds);
+      
+      const response = await api.post(`/standard-config/${activeTab}`, {
+        dimension_ids: dimensionIds
+      });
+      
+      if (response.data.success) {
+        message.success(`${activeTab}分类的标准配置保存成功`);
+        hideSelectModal();
+        // 重新加载数据以确保状态同步
+        await loadSelectedStandards();
+        // 强制刷新UI状态
+        setSelectedStandards(prevStandards => [...prevStandards]);
       } else {
-        // 创建新标准
-        await api.post('/evaluation-standards', values);
-        message.success('评估标准创建成功');
+        message.error('保存失败: ' + response.data.message);
       }
-      
-      hideModal();
-      loadEvaluationStandards();
     } catch (error) {
-      if (error.response?.data?.error) {
-        message.error(error.response.data.error);
-      } else {
-        message.error('保存失败');
-      }
+      console.error('保存失败:', error);
+      message.error('保存失败: ' + error.message);
     }
   };
 
-  // 删除评估标准
-  const handleDelete = async (id) => {
-    try {
-      await api.delete(`/evaluation-standards/${id}`);
-      message.success('评估标准删除成功');
-      loadEvaluationStandards();
-    } catch (error) {
-      if (error.response?.data?.error) {
-        message.error(error.response.data.error);
-      } else {
-        message.error('删除失败');
-      }
+  // 渲染评测标准
+  const renderEvaluationCriteria = (criteria) => {
+    if (!criteria || criteria.length === 0) {
+      return <Text type="secondary">暂无评测标准</Text>;
     }
+
+    return (
+      <Space direction="vertical" style={{ width: '100%' }}>
+        {criteria.map((item, index) => (
+          <div key={index} style={{ 
+            padding: '8px 12px', 
+            background: '#f5f5f5', 
+            borderRadius: '4px',
+            border: '1px solid #d9d9d9'
+          }}>
+            <Space>
+              <Tag color="blue">{item.level}</Tag>
+              <Text>{item.description}</Text>
+              <Tag color="orange">{item.score}分</Tag>
+            </Space>
+          </div>
+        ))}
+      </Space>
+    );
   };
 
-  // 表格列定义
-  const columns = [
+  // 选择标准页面的列定义
+  const selectionColumns = [
     {
-      title: '评估维度',
-      dataIndex: 'dimension',
-      key: 'dimension',
-      width: 120,
+      title: '选择',
+      key: 'selection',
+      width: 60,
+      render: (_, record) => {
+        // 检查当前维度是否已被当前分类选择
+        const isSelected = selectedStandards.some(item => 
+          item.id === record.id && item.category === activeTab
+        );
+        return (
+          <Checkbox
+            checked={isSelected}
+            onChange={(e) => {
+              if (e.target.checked) {
+                // 添加到当前分类的选择中
+                const newStandard = { ...record, category: activeTab };
+                setSelectedStandards(prev => {
+                  // 移除该维度在其他分类中的选择（如果存在）
+                  const filtered = prev.filter(item => item.id !== record.id);
+                  return [...filtered, newStandard];
+                });
+              } else {
+                // 从当前分类的选择中移除
+                setSelectedStandards(prev => 
+                  prev.filter(item => !(item.id === record.id && item.category === activeTab))
+                );
+              }
+            }}
+          />
+        );
+      }
+    },
+    {
+      title: '维度名称',
+      dataIndex: 'name',
+      key: 'name',
+      width: 150,
       render: (text, record) => (
         <Space>
-          <Tag color={record.is_default ? 'blue' : 'green'}>
-            {text}
-          </Tag>
-          {record.is_default && (
-            <Tooltip title="系统默认标准">
-              <CheckCircleOutlined style={{ color: '#1890ff' }} />
-            </Tooltip>
-          )}
+          <Text strong>{text}</Text>
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => showDetailModal(record)}
+          >
+            详情
+          </Button>
         </Space>
       )
     },
     {
-      title: '参考标准',
-      dataIndex: 'reference_standard',
-      key: 'reference_standard',
+      title: '定义',
+      dataIndex: 'definition',
+      key: 'definition',
       ellipsis: {
         showTitle: false,
       },
@@ -188,9 +310,50 @@ const EvaluationStandardConfig = () => {
       )
     },
     {
-      title: '打分原则',
-      dataIndex: 'scoring_principle',
-      key: 'scoring_principle',
+      title: '分类',
+      dataIndex: 'category',
+      key: 'category',
+      width: 100,
+      render: (category) => (
+        <Tag color="geekblue">{category}</Tag>
+      )
+    },
+    {
+      title: '层次',
+      dataIndex: 'layer',
+      key: 'layer',
+      width: 120,
+      render: (layer) => (
+        <Tag color="purple">{layer}</Tag>
+      )
+    }
+  ];
+
+  // 已选择标准的列定义
+  const selectedColumns = [
+    {
+      title: '维度名称',
+      dataIndex: 'name',
+      key: 'name',
+      width: 150,
+      render: (text, record) => (
+        <Space>
+          <Text strong>{text}</Text>
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => showDetailModal(record)}
+          >
+            详情
+          </Button>
+        </Space>
+      )
+    },
+    {
+      title: '定义',
+      dataIndex: 'definition',
+      key: 'definition',
       ellipsis: {
         showTitle: false,
       },
@@ -201,45 +364,40 @@ const EvaluationStandardConfig = () => {
       )
     },
     {
-      title: '最高分',
-      dataIndex: 'max_score',
-      key: 'max_score',
-      width: 80,
-      align: 'center',
-      render: (score) => (
-        <Tag color="orange">{score}分</Tag>
+      title: '分类',
+      dataIndex: 'category',
+      key: 'category',
+      width: 100,
+      render: (category) => (
+        <Tag color="geekblue">{category}</Tag>
+      )
+    },
+    {
+      title: '层次',
+      dataIndex: 'layer',
+      key: 'layer',
+      width: 120,
+      render: (layer) => (
+        <Tag color="purple">{layer}</Tag>
       )
     },
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 80,
       render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="编辑">
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => showModal(record)}
-            />
-          </Tooltip>
-          {!record.is_default && (
-            <Tooltip title="删除">
-              <Popconfirm
-                title="确定要删除这个评估标准吗？"
-                onConfirm={() => handleDelete(record.id)}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button
-                  type="text"
-                  danger
-                  icon={<DeleteOutlined />}
-                />
-              </Popconfirm>
-            </Tooltip>
-          )}
-        </Space>
+        <Button
+          type="text"
+          danger
+          size="small"
+          onClick={() => {
+            setSelectedStandards(selectedStandards.filter(item => 
+              !(item.id === record.id && item.category === record.category)
+            ));
+          }}
+        >
+          移除
+        </Button>
       )
     }
   ];
@@ -247,15 +405,23 @@ const EvaluationStandardConfig = () => {
   // 计算统计信息
   const getStatistics = (standards) => {
     if (!standards || standards.length === 0) {
-      return { total: 0, totalScore: 0, defaultCount: 0, customCount: 0 };
+      return { total: 0, layer1: 0, layer2: 0, layer3: 0, other: 0 };
     }
     
-    const total = standards.length;
-    const totalScore = standards.reduce((sum, item) => sum + item.max_score, 0);
-    const defaultCount = standards.filter(item => item.is_default).length;
-    const customCount = total - defaultCount;
+    const stats = {
+      total: standards.length,
+      layer1: standards.filter(s => s.layer === '第一层指标').length,
+      layer2: standards.filter(s => s.layer === '第二层指标').length,
+      layer3: standards.filter(s => s.layer === '第三层指标').length,
+      other: standards.filter(s => s.layer === '其他服务场景').length
+    };
     
-    return { total, totalScore, defaultCount, customCount };
+    return stats;
+  };
+
+  // 按分类过滤已选择的标准
+  const getSelectedStandardsByCategory = (category) => {
+    return selectedStandards.filter(standard => standard.category === category);
   };
 
   return (
@@ -264,11 +430,11 @@ const EvaluationStandardConfig = () => {
         <div style={{ marginBottom: '24px' }}>
           <Title level={3}>
             <InfoCircleOutlined style={{ marginRight: '8px', color: '#1890ff' }} />
-            评估标准配置
+            标准选择配置
           </Title>
           <Paragraph>
-            为每个二级分类配置专属的评估标准，包括评估维度、参考标准和打分原则。
-            系统提供默认标准，您也可以添加自定义标准。
+            从维度管理页面配置的维度中选择需要应用的评估标准。
+            可以为每个二级分类选择不同层次的标准，支持多选。
           </Paragraph>
         </div>
 
@@ -279,14 +445,14 @@ const EvaluationStandardConfig = () => {
             <Space>
               <Button
                 type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => showModal()}
+                icon={<CheckOutlined />}
+                onClick={showSelectModal}
               >
-                新增标准
+                选择标准
               </Button>
               <Button
                 icon={<ReloadOutlined />}
-                onClick={loadEvaluationStandards}
+                onClick={loadDimensions}
                 loading={loading}
               >
                 刷新
@@ -295,15 +461,15 @@ const EvaluationStandardConfig = () => {
           }
         >
           {categoryOptions.map(category => {
-            const standards = groupedStandards[category] || [];
-            const stats = getStatistics(standards);
+            const categoryStandards = getSelectedStandardsByCategory(category);
+            const stats = getStatistics(categoryStandards);
             
             return (
               <TabPane
                 tab={
                   <Space>
                     {category}
-                    <Tag>{standards.length}</Tag>
+                    <Badge count={categoryStandards.length} showZero />
                   </Space>
                 }
                 key={category}
@@ -312,48 +478,47 @@ const EvaluationStandardConfig = () => {
                   <Row gutter={16}>
                     <Col span={6}>
                       <Statistic
-                        title="评估标准数量"
+                        title="已选择标准"
                         value={stats.total}
                         prefix={<CheckCircleOutlined />}
                       />
                     </Col>
                     <Col span={6}>
                       <Statistic
-                        title="总分值"
-                        value={stats.totalScore}
-                        suffix="分"
-                        prefix={<WarningOutlined />}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="默认标准"
-                        value={stats.defaultCount}
+                        title="第一层指标"
+                        value={stats.layer1}
                         valueStyle={{ color: '#1890ff' }}
                       />
                     </Col>
                     <Col span={6}>
                       <Statistic
-                        title="自定义标准"
-                        value={stats.customCount}
+                        title="第二层指标"
+                        value={stats.layer2}
                         valueStyle={{ color: '#52c41a' }}
+                      />
+                    </Col>
+                    <Col span={6}>
+                      <Statistic
+                        title="第三层指标"
+                        value={stats.layer3}
+                        valueStyle={{ color: '#faad14' }}
                       />
                     </Col>
                   </Row>
                 </div>
 
-                {standards.length === 0 ? (
+                {categoryStandards.length === 0 ? (
                   <Alert
-                    message="暂无评估标准"
-                    description={`${category}分类下还没有配置评估标准，请添加。`}
+                    message="暂无选择的标准"
+                    description={`${category}分类下还没有选择评估标准，请点击"选择标准"按钮进行选择。`}
                     type="info"
                     showIcon
                     style={{ marginTop: '16px' }}
                   />
                 ) : (
                   <Table
-                    columns={columns}
-                    dataSource={standards}
+                    columns={selectedColumns}
+                    dataSource={categoryStandards}
                     rowKey="id"
                     loading={loading}
                     pagination={false}
@@ -367,84 +532,115 @@ const EvaluationStandardConfig = () => {
         </Tabs>
       </Card>
 
-      {/* 新增/编辑模态框 */}
+      {/* 选择标准模态框 */}
       <Modal
-        title={editingStandard ? '编辑评估标准' : '新增评估标准'}
+        title="选择评估标准"
         open={modalVisible}
-        onOk={handleSave}
-        onCancel={hideModal}
-        width={600}
-        okText="保存"
+        onOk={handleSaveSelection}
+        onCancel={hideSelectModal}
+        width={1200}
+        okText="保存选择"
         cancelText="取消"
-        destroyOnClose
+        style={{ top: 20 }}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{
-            max_score: 3
-          }}
-        >
-          <Form.Item
-            name="level2_category"
-            label="二级分类"
-            rules={[{ required: true, message: '请选择二级分类' }]}
-          >
-            <Select placeholder="选择二级分类">
-              {categoryOptions.map(option => (
-                <Option key={option} value={option}>
-                  {option}
-                </Option>
-              ))}
-            </Select>
-          </Form.Item>
+        <div style={{ marginBottom: '16px' }}>
+          <Alert
+            message="选择说明"
+            description={`当前正在为"${activeTab}"分类选择评估标准。您可以从不同层次的维度中选择需要的标准，支持多选。`}
+            type="info"
+            showIcon
+          />
+        </div>
 
-          <Form.Item
-            name="dimension"
-            label="评估维度"
-            rules={[{ required: true, message: '请输入评估维度' }]}
-          >
-            <Input placeholder="如：准确性、完整性、相关性等" />
-          </Form.Item>
+        <Collapse defaultActiveKey={layerOptions}>
+          {layerOptions.map(layer => {
+            const layerDimensions = groupedDimensions[layer] || [];
+            const selectedInLayer = selectedStandards.filter(s => 
+              s.layer === layer && s.category === activeTab
+            );
+            
+            return (
+              <Panel
+                header={
+                  <Space>
+                    <Text strong>{layer}</Text>
+                    <Badge count={layerDimensions.length} showZero style={{ backgroundColor: '#52c41a' }} />
+                    <Text type="secondary">
+                      已选择: {selectedInLayer.length}
+                    </Text>
+                  </Space>
+                }
+                key={layer}
+              >
+                {layerDimensions.length === 0 ? (
+                  <Empty description={`${layer}暂无可选择的维度`} />
+                ) : (
+                  <Table
+                    columns={selectionColumns}
+                    dataSource={layerDimensions}
+                    rowKey="id"
+                    pagination={false}
+                    size="small"
+                  />
+                )}
+              </Panel>
+            );
+          })}
+        </Collapse>
+      </Modal>
 
-          <Form.Item
-            name="reference_standard"
-            label="参考标准"
-            rules={[{ required: true, message: '请输入参考标准' }]}
-          >
-            <TextArea
-              rows={3}
-              placeholder="描述该维度的具体评估标准和要求"
-            />
-          </Form.Item>
+      {/* 维度详情模态框 */}
+      <Modal
+        title="维度详情"
+        open={detailModalVisible}
+        onCancel={hideDetailModal}
+        footer={[
+          <Button key="close" onClick={hideDetailModal}>
+            关闭
+          </Button>
+        ]}
+        width={800}
+      >
+        {viewingDimension && (
+          <div>
+            <Row gutter={16} style={{ marginBottom: '16px' }}>
+              <Col span={12}>
+                <Card size="small" title="基本信息">
+                  <p><Text strong>维度名称：</Text>{viewingDimension.name}</p>
+                  <p><Text strong>分类：</Text><Tag color="geekblue">{viewingDimension.category}</Tag></p>
+                  <p><Text strong>层次：</Text><Tag color="purple">{viewingDimension.layer}</Tag></p>
+                  <p><Text strong>状态：</Text>
+                    {viewingDimension.is_active ? 
+                      <Tag color="green">启用</Tag> : 
+                      <Tag color="red">禁用</Tag>
+                    }
+                  </p>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card size="small" title="排序信息">
+                  <p><Text strong>排序序号：</Text>{viewingDimension.sort_order}</p>
+                  <p><Text strong>创建时间：</Text>{viewingDimension.created_at}</p>
+                  <p><Text strong>更新时间：</Text>{viewingDimension.updated_at}</p>
+                </Card>
+              </Col>
+            </Row>
 
-          <Form.Item
-            name="scoring_principle"
-            label="打分原则"
-            rules={[{ required: true, message: '请输入打分原则' }]}
-          >
-            <TextArea
-              rows={3}
-              placeholder="详细说明评分规则，如：0-4分：完全符合=4分；部分符合=2分；完全不符=0分"
-            />
-          </Form.Item>
+            <Card size="small" title="维度定义" style={{ marginBottom: '16px' }}>
+              <Paragraph>{viewingDimension.definition}</Paragraph>
+            </Card>
 
-          <Form.Item
-            name="max_score"
-            label="最高分数"
-            rules={[
-              { required: true, message: '请输入最高分数' },
-              { type: 'number', min: 1, max: 10, message: '分数范围应在1-10之间' }
-            ]}
-          >
-            <InputNumber
-              min={1}
-              max={10}
-              placeholder="最高分数"
-              style={{ width: '100%' }}
-            />
-          </Form.Item>
-        </Form>
+            <Card size="small" title="评测标准" style={{ marginBottom: '16px' }}>
+              {renderEvaluationCriteria(viewingDimension.evaluation_criteria)}
+            </Card>
+
+            {viewingDimension.examples && (
+              <Card size="small" title="示例说明">
+                <Paragraph>{viewingDimension.examples}</Paragraph>
+              </Card>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -175,17 +175,35 @@ const EvaluationHistory = () => {
     return { text: '需改进', color: 'error' };
   };
 
-  // 维度显示名称映射
-  const dimensionNames = {
-    accuracy: '准确性',
-    completeness: '完整性',
-    fluency: '流畅性',
-    safety: '安全性',
-    relevance: '相关性',
-    clarity: '清晰度',
-    timeliness: '时效性',
-    usability: '可用性',
-    compliance: '合规性'
+  // 获取维度标准配置
+  const [standardsData, setStandardsData] = useState({});
+  const [standardsLoading, setStandardsLoading] = useState(false);
+
+  // 加载维度标准配置
+  const fetchStandardsData = useCallback(async () => {
+    try {
+      setStandardsLoading(true);
+      const response = await api.get('/standard-config');
+      if (response.data.success) {
+        setStandardsData(response.data.data);
+      }
+    } catch (error) {
+      console.error('获取标准配置失败:', error);
+    } finally {
+      setStandardsLoading(false);
+    }
+  }, []);
+
+  // 初始化时加载标准配置
+  useEffect(() => {
+    fetchStandardsData();
+  }, [fetchStandardsData]);
+
+  // 由于数据库已重构，直接显示维度名称，无需映射
+  const getDimensionDisplayName = (dimensionKey, classification) => {
+    // 数据库重构后，所有维度都已使用新维度体系保存
+    // 直接返回原始维度名称即可
+    return dimensionKey;
   };
 
   // 获取图片完整URL
@@ -392,7 +410,7 @@ const EvaluationHistory = () => {
       dataIndex: 'dimensions',
       key: 'dimensions',
       width: 200,
-      render: (dimensions) => {
+      render: (dimensions, record) => {
         if (!dimensions || Object.keys(dimensions).length === 0) {
           return <Text type="secondary">无维度数据</Text>;
         }
@@ -401,7 +419,7 @@ const EvaluationHistory = () => {
           <Space wrap size={4}>
             {Object.entries(dimensions).slice(0, 3).map(([key, value]) => (
               <Tag key={key} size="small">
-                {dimensionNames[key] || key}: {value}
+                {getDimensionDisplayName(key, record.classification_level2)}: {value}
               </Tag>
             ))}
             {Object.keys(dimensions).length > 3 && (
@@ -678,7 +696,7 @@ const EvaluationHistory = () => {
                         >
                           <div style={{ textAlign: 'center' }}>
                             <Text strong style={{ color: '#1890ff' }}>
-                              {dimensionNames[key] || key}
+                              {getDimensionDisplayName(key, selectedRecord.classification_level2)}
                             </Text>
                             <div style={{ marginTop: 8 }}>
                               <Text style={{ 
@@ -784,7 +802,7 @@ const EvaluationHistory = () => {
                                   border: '1px solid #e9ecef'
                                 }}>
                                   <Text strong style={{ fontSize: '12px' }}>
-                                    {dimensionNames[key] || key}
+                                    {getDimensionDisplayName(key, selectedRecord.classification_level2)}
                                   </Text>
                                   <div>
                                     <Text style={{ color: getScoreColor(value * 2.5) }}>

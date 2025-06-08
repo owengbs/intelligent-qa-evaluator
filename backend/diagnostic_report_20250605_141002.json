@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-06-05T14:09:58.219802",
+  "backend_healthy": true,
+  "frontend_healthy": true,
+  "cors_ok": true,
+  "api_endpoints": [
+    [
+      "健康检查",
+      true,
+      404
+    ],
+    [
+      "分类标准",
+      true,
+      200
+    ],
+    [
+      "评估标准",
+      true,
+      200
+    ],
+    [
+      "评估历史",
+      true,
+      200
+    ]
+  ],
+  "recommendations": [
+    "✅ 所有检查都正常，前后端连接应该没有问题"
+  ]
+}

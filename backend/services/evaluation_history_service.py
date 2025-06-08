@@ -4,7 +4,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, desc, asc
+from sqlalchemy import func, desc, asc, or_
 from models.classification import db, EvaluationHistory
 from utils.logger import get_logger
 
@@ -414,85 +414,117 @@ class EvaluationHistoryService:
     
     def get_dimension_statistics(self):
         """
-        获取维度统计信息 - 各个二级分类下各维度的评分百分比
+        获取维度统计信息 - 分别统计AI评估和人工评估的结果
         
         Returns:
-            dict: 维度统计信息
+            dict: 维度统计信息，包含AI和人工评估的分离数据
         """
         try:
-            # 获取所有有维度数据的评估记录
+            # 获取所有有维度数据的评估记录（包括AI评估和人工评估）
             evaluations = EvaluationHistory.query.filter(
-                EvaluationHistory.dimensions_json.isnot(None),
+                or_(
+                    EvaluationHistory.dimensions_json.isnot(None),
+                    EvaluationHistory.human_dimensions_json.isnot(None)
+                ),
                 EvaluationHistory.classification_level2.isnot(None)
             ).all()
             
-            # 按分类组织数据
-            category_stats = {}
+            # 获取标准配置
+            try:
+                import sys
+                import os
+                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+                from database_operations import db_ops
+                standards_result = db_ops.get_all_category_standards()
+                standards_data = standards_result.get('data', {}) if standards_result.get('success') else {}
+            except Exception as e:
+                self.logger.warning(f"获取标准配置失败，使用旧逻辑: {str(e)}")
+                standards_data = {}
+            
+            # 分别按分类组织AI和人工评估数据
+            ai_category_stats = {}
+            human_category_stats = {}
             
             for evaluation in evaluations:
                 category = evaluation.classification_level2
                 
-                if category not in category_stats:
-                    category_stats[category] = {
-                        'total_evaluations': 0,
-                        'dimensions': {}
-                    }
-                
-                category_stats[category]['total_evaluations'] += 1
-                
-                # 解析维度数据
-                try:
-                    dimensions = json.loads(evaluation.dimensions_json)
-                    
-                    for dimension_key, score in dimensions.items():
-                        if dimension_key not in category_stats[category]['dimensions']:
-                            category_stats[category]['dimensions'][dimension_key] = {
-                                'scores': [],
-                                'max_possible_score': self._get_dimension_max_score(
-                                    dimension_key, evaluation.evaluation_criteria
-                                )
-                            }
-                        
-                        category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
-                        
-                except (json.JSONDecodeError, TypeError) as e:
-                    self.logger.warning(f"解析维度数据失败: {str(e)}")
-                    continue
-            
-            # 计算统计数据
-            result_stats = {}
-            
-            for category, data in category_stats.items():
-                result_stats[category] = {
-                    'total_evaluations': data['total_evaluations'],
-                    'dimensions': {}
-                }
-                
-                for dimension_key, dimension_data in data['dimensions'].items():
-                    scores = dimension_data['scores']
-                    max_score = dimension_data['max_possible_score']
-                    
-                    if scores and max_score > 0:
-                        # 计算百分比分数
-                        percentages = [(score / max_score) * 100 for score in scores]
-                        
-                        result_stats[category]['dimensions'][dimension_key] = {
-                            'dimension_name': self._get_dimension_display_name(dimension_key),
-                            'total_evaluations': len(scores),
-                            'avg_score': round(sum(scores) / len(scores), 2),
-                            'max_possible_score': max_score,
-                            'avg_percentage': round(sum(percentages) / len(percentages), 2),
-                            'min_percentage': round(min(percentages), 2),
-                            'max_percentage': round(max(percentages), 2),
-                            'score_distribution': self._calculate_score_distribution(percentages)
+                # 处理AI评估数据
+                if evaluation.dimensions_json:
+                    if category not in ai_category_stats:
+                        ai_category_stats[category] = {
+                            'total_evaluations': 0,
+                            'dimensions': {}
                         }
+                    
+                    ai_category_stats[category]['total_evaluations'] += 1
+                    
+                    try:
+                        ai_dimensions = json.loads(evaluation.dimensions_json)
+                        self.logger.debug(f"解析到AI维度数据: {ai_dimensions}")
+                        
+                        for dimension_key, score in ai_dimensions.items():
+                            if dimension_key not in ai_category_stats[category]['dimensions']:
+                                max_score = self._get_dimension_max_score_from_standards(
+                                    dimension_key, category, standards_data, evaluation.evaluation_criteria
+                                )
+                                ai_category_stats[category]['dimensions'][dimension_key] = {
+                                    'scores': [],
+                                    'max_possible_score': max_score
+                                }
+                            ai_category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
+                            
+                    except (json.JSONDecodeError, TypeError) as e:
+                        self.logger.warning(f"解析AI维度数据失败: {str(e)}")
+                
+                # 处理人工评估数据
+                if evaluation.human_dimensions_json:
+                    if category not in human_category_stats:
+                        human_category_stats[category] = {
+                            'total_evaluations': 0,
+                            'dimensions': {}
+                        }
+                    
+                    human_category_stats[category]['total_evaluations'] += 1
+                    
+                    try:
+                        human_dimensions = json.loads(evaluation.human_dimensions_json)
+                        self.logger.debug(f"解析到人工维度数据: {human_dimensions}")
+                        
+                        for dimension_key, score in human_dimensions.items():
+                            if dimension_key not in human_category_stats[category]['dimensions']:
+                                max_score = self._get_dimension_max_score_from_standards(
+                                    dimension_key, category, standards_data, evaluation.evaluation_criteria
+                                )
+                                human_category_stats[category]['dimensions'][dimension_key] = {
+                                    'scores': [],
+                                    'max_possible_score': max_score
+                                }
+                            human_category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
+                            
+                    except (json.JSONDecodeError, TypeError) as e:
+                        self.logger.warning(f"解析人工维度数据失败: {str(e)}")
+            
+            # 计算AI评估统计数据
+            ai_result_stats = self._calculate_dimension_stats(ai_category_stats, standards_data, "AI")
+            
+            # 计算人工评估统计数据
+            human_result_stats = self._calculate_dimension_stats(human_category_stats, standards_data, "人工")
             
             result = {
                 'success': True,
-                'data': result_stats
+                'data': {
+                    'ai_evaluation': ai_result_stats,
+                    'human_evaluation': human_result_stats,
+                    'summary': {
+                        'ai_total_evaluations': sum(cat.get('total_evaluations', 0) for cat in ai_result_stats.values()),
+                        'human_total_evaluations': sum(cat.get('total_evaluations', 0) for cat in human_result_stats.values()),
+                        'ai_categories': len(ai_result_stats),
+                        'human_categories': len(human_result_stats)
+                    }
+                }
             }
             
-            self.logger.info("成功获取维度统计信息")
+            self.logger.info("成功获取分离的维度统计信息")
             return result
             
         except Exception as e:
@@ -501,6 +533,53 @@ class EvaluationHistoryService:
                 'success': False,
                 'message': f'获取维度统计失败: {str(e)}'
             }
+    
+    def _calculate_dimension_stats(self, category_stats, standards_data, evaluation_type):
+        """
+        计算维度统计数据的通用方法
+        
+        Args:
+            category_stats: 分类统计数据
+            standards_data: 标准配置数据
+            evaluation_type: 评估类型（AI或人工）
+            
+        Returns:
+            dict: 计算后的统计数据
+        """
+        result_stats = {}
+        
+        for category, data in category_stats.items():
+            result_stats[category] = {
+                'total_evaluations': data['total_evaluations'],
+                'dimensions': {}
+            }
+            
+            for dimension_key, dimension_data in data['dimensions'].items():
+                scores = dimension_data['scores']
+                max_score = dimension_data['max_possible_score']
+                
+                if scores and max_score > 0:
+                    # 计算百分比分数
+                    percentages = [(score / max_score) * 100 for score in scores]
+                    
+                    # 从标准配置中获取维度显示名称
+                    dimension_name = self._get_dimension_display_name_from_standards(
+                        dimension_key, category, standards_data
+                    )
+                    
+                    result_stats[category]['dimensions'][dimension_key] = {
+                        'dimension_name': dimension_name,
+                        'total_evaluations': len(scores),
+                        'avg_score': round(sum(scores) / len(scores), 2),
+                        'max_possible_score': max_score,
+                        'avg_percentage': round(sum(percentages) / len(percentages), 2),
+                        'min_percentage': round(min(percentages), 2),
+                        'max_percentage': round(max(percentages), 2),
+                        'score_distribution': self._calculate_score_distribution(percentages),
+                        'evaluation_type': evaluation_type
+                    }
+        
+        return result_stats
     
     def _get_dimension_max_score(self, dimension_key, evaluation_criteria):
         """从评估标准中解析维度最大分数"""
@@ -533,30 +612,91 @@ class EvaluationHistoryService:
         
         return 5  # 默认值
     
-    def _get_dimension_display_name(self, dimension_key):
-        """获取维度显示名称"""
-        display_names = {
-            'accuracy': '准确性',
-            'completeness': '完整性',
-            'fluency': '流畅性',
-            'safety': '安全性',
-            'relevance': '相关性',
-            'clarity': '清晰度',
-            'timeliness': '时效性',
-            'usability': '可用性',
-            'compliance': '合规性'
-        }
-        return display_names.get(dimension_key, dimension_key.capitalize())
+    def _get_dimension_display_name(self, dimension_key, evaluation_criteria=None):
+        """获取维度显示名称 - 数据库重构后直接返回原始名称"""
+        # 数据库重构后，所有维度都已使用新维度体系保存，直接返回原始名称
+        return dimension_key
     
     def _normalize_dimension_key(self, dimension_name):
         """标准化维度名称为key"""
         name_mapping = {
             '准确性': 'accuracy', '完整性': 'completeness', '流畅性': 'fluency',
             '安全性': 'safety', '相关性': 'relevance', '清晰度': 'clarity',
-            '时效性': 'timeliness', '可用性': 'usability', '合规性': 'compliance'
+            '时效性': 'timeliness', '可用性': 'usability', '合规性': 'compliance',
+            '数据准确性': 'data_accuracy', '数据时效性': 'data_timeliness',
+            '内容完整性': 'content_completeness', '用户视角': 'user_perspective',
+            '用户体验': 'user_experience', '可操作性': 'operability'
         }
-        return name_mapping.get(dimension_name.strip(), dimension_name.lower())
+        
+        # 精确匹配
+        if dimension_name.strip() in name_mapping:
+            return name_mapping[dimension_name.strip()]
+        
+        # 模糊匹配 - 检查是否包含关键词
+        for cn_name, en_key in name_mapping.items():
+            if cn_name in dimension_name or dimension_name in cn_name:
+                return en_key
+        
+        # 返回标准化的英文key
+        return dimension_name.strip().lower().replace(' ', '_').replace('/', '_')
     
+    def _get_dimension_max_score_from_standards(self, dimension_key, category, standards_data, fallback_criteria=None):
+        """从标准配置中获取维度最大分数"""
+        # 优先从标准配置中获取
+        if category in standards_data:
+            for dimension in standards_data[category]:
+                if dimension.get('name') == dimension_key:
+                    # 从evaluation_criteria中计算最大分数
+                    criteria = dimension.get('evaluation_criteria', [])
+                    if criteria:
+                        max_score = max(c.get('score', 0) for c in criteria)
+                        self.logger.debug(f"从标准配置获取维度 {dimension_key} 最大分数: {max_score}")
+                        return max_score
+        
+        # 回退：从evaluation_criteria文本中解析最大分数
+        if fallback_criteria:
+            max_score = self._parse_max_score_from_criteria_text(dimension_key, fallback_criteria)
+            if max_score > 0:
+                self.logger.debug(f"从评估标准文本解析维度 {dimension_key} 最大分数: {max_score}")
+                return max_score
+        
+        # 最后回退：使用新维度体系的默认分数
+        default_scores = {
+            '数据准确性': 2,
+            '数据时效性': 2, 
+            '内容完整性': 2,
+            '用户视角': 2
+        }
+        
+        default_score = default_scores.get(dimension_key, 2)
+        self.logger.debug(f"使用默认分数，维度 {dimension_key}: {default_score}")
+        return default_score
+    
+    def _parse_max_score_from_criteria_text(self, dimension_key, criteria_text):
+        """从评估标准文本中解析最大分数"""
+        import re
+        
+        # 查找包含维度名称的行
+        lines = criteria_text.split('\n')
+        for line in lines:
+            if dimension_key in line:
+                # 匹配 "（最高X分）" 模式
+                score_match = re.search(r'（最高(\d+)分）', line)
+                if score_match:
+                    return int(score_match.group(1))
+                
+                # 匹配其他可能的分数模式
+                score_match = re.search(r'(\d+)分\)', line)
+                if score_match:
+                    return int(score_match.group(1))
+        
+        return 0
+    
+    def _get_dimension_display_name_from_standards(self, dimension_key, category, standards_data):
+        """从标准配置中获取维度显示名称 - 数据库重构后直接返回原始名称"""
+        # 数据库重构后，所有维度都已使用新维度体系保存，直接返回原始名称
+        return dimension_key
+
     def _calculate_score_distribution(self, percentages):
         """计算分数分布"""
         distribution = {
