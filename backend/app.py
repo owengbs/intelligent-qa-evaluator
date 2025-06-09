@@ -696,6 +696,52 @@ def get_badcase_records():
         logger.error(f"获取badcase记录失败: {str(e)}")
         return jsonify({'error': f'获取badcase记录失败: {str(e)}'}), 500
 
+@app.route('/api/badcase-reasons/<category>', methods=['GET'])
+def get_badcase_reasons_by_category(category):
+    """获取指定分类下的badcase原因"""
+    try:
+        logger.info(f"获取分类 {category} 的badcase原因")
+        
+        result = evaluation_history_service.get_badcase_reasons_by_category(category)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取badcase原因失败: {str(e)}")
+        return jsonify({'error': f'获取badcase原因失败: {str(e)}'}), 500
+
+@app.route('/api/badcase-summary/<category>', methods=['POST'])
+def generate_badcase_summary(category):
+    """生成指定分类的badcase AI总结"""
+    try:
+        logger.info(f"生成分类 {category} 的badcase AI总结")
+        
+        # 首先获取该分类的badcase原因
+        reasons_result = evaluation_history_service.get_badcase_reasons_by_category(category)
+        
+        if not reasons_result['success']:
+            return jsonify(reasons_result), 400
+        
+        # 检查是否有足够的原因进行总结
+        reasons_data = reasons_result['data']
+        if len(reasons_data['reasons']) == 0:
+            return jsonify({
+                'success': False,
+                'message': f'分类 {category} 下没有badcase原因可供总结'
+            }), 400
+        
+        # 导入AI总结服务
+        from services.ai_summary_service import ai_summary_service
+        
+        # 调用AI总结服务
+        summary_result = ai_summary_service.summarize_badcase_reasons(category, reasons_data)
+        
+        return jsonify(summary_result)
+        
+    except Exception as e:
+        logger.error(f"生成badcase总结失败: {str(e)}")
+        return jsonify({'error': f'生成badcase总结失败: {str(e)}'}), 500
+
 @app.route('/api/evaluation-standards/<category>/weights', methods=['PUT'])
 def update_dimension_weights(category):
     """更新指定分类下各维度的权重"""

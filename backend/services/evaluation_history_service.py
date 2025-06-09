@@ -904,4 +904,61 @@ class EvaluationHistoryService:
             return {
                 'success': False,
                 'message': f'获取badcase记录失败: {str(e)}'
+            }
+    
+    def get_badcase_reasons_by_category(self, category):
+        """
+        获取指定分类下所有badcase的原因汇总
+        
+        Args:
+            category: 分类名称
+            
+        Returns:
+            dict: badcase原因列表
+        """
+        try:
+            # 查询该分类下所有badcase记录的原因
+            badcase_records = EvaluationHistory.query.filter(
+                EvaluationHistory.classification_level2 == category,
+                EvaluationHistory.is_badcase == True
+            ).all()
+            
+            reasons = []
+            for record in badcase_records:
+                # 收集AI判断的badcase原因
+                if record.ai_is_badcase and record.ai_badcase_reason:
+                    reasons.append({
+                        'type': 'ai',
+                        'reason': record.ai_badcase_reason,
+                        'record_id': record.id,
+                        'question': record.question_text[:100] + '...' if len(record.question_text) > 100 else record.question_text
+                    })
+                
+                # 收集人工标记的badcase原因
+                if record.human_is_badcase and record.human_badcase_reason:
+                    reasons.append({
+                        'type': 'human',
+                        'reason': record.human_badcase_reason,
+                        'record_id': record.id,
+                        'question': record.question_text[:100] + '...' if len(record.question_text) > 100 else record.question_text
+                    })
+            
+            result = {
+                'success': True,
+                'data': {
+                    'category': category,
+                    'total_badcases': len(badcase_records),
+                    'total_reasons': len(reasons),
+                    'reasons': reasons
+                }
+            }
+            
+            self.logger.info(f"获取分类 {category} 的badcase原因成功: {len(reasons)}条原因")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取分类badcase原因失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f'获取分类badcase原因失败: {str(e)}'
             } 

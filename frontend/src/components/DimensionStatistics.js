@@ -13,14 +13,21 @@ import {
   Tabs,
   Space,
   Button,
-  Badge
+  Badge,
+  Modal,
+  message,
+  Divider,
+  Alert
 } from 'antd';
 import {
   BarChartOutlined,
   PieChartOutlined,
   TrophyOutlined,
   ReloadOutlined,
-  LineChartOutlined
+  LineChartOutlined,
+  RobotOutlined,
+  BulbOutlined,
+  ExclamationCircleOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -40,6 +47,14 @@ const DimensionStatistics = () => {
   const [loading, setLoading] = useState(false);
   const [statisticsData, setStatisticsData] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  
+  // AI总结相关状态
+  const [summaryModal, setSummaryModal] = useState({
+    visible: false,
+    loading: false,
+    category: '',
+    data: null
+  });
 
   // 获取维度统计数据
   const fetchDimensionStatistics = useCallback(async () => {
@@ -75,6 +90,48 @@ const DimensionStatistics = () => {
   useEffect(() => {
     fetchDimensionStatistics();
   }, [fetchDimensionStatistics]);
+
+  // AI总结功能
+  const handleAISummary = async (category) => {
+    try {
+      setSummaryModal({
+        visible: true,
+        loading: true,
+        category: category,
+        data: null
+      });
+
+      const response = await api.post(`/badcase-summary/${encodeURIComponent(category)}`);
+      
+      if (response.data.success) {
+        setSummaryModal(prev => ({
+          ...prev,
+          loading: false,
+          data: response.data.data
+        }));
+        message.success('AI总结生成完成');
+      } else {
+        throw new Error(response.data.message || 'AI总结生成失败');
+      }
+    } catch (error) {
+      console.error('AI总结失败:', error);
+      message.error(error.response?.data?.message || error.message || 'AI总结生成失败');
+      setSummaryModal(prev => ({
+        ...prev,
+        loading: false,
+        visible: false
+      }));
+    }
+  };
+
+  const closeSummaryModal = () => {
+    setSummaryModal({
+      visible: false,
+      loading: false,
+      category: '',
+      data: null
+    });
+  };
 
   // 获取百分比对应的颜色
   const getPercentageColor = (percentage) => {
@@ -1539,6 +1596,21 @@ const DimensionStatistics = () => {
                           {categoryStatus.icon} {categoryStatus.text}
                         </Tag>
                       </div>
+                      <div style={{ marginTop: 12 }}>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<RobotOutlined />}
+                          onClick={() => handleAISummary(category)}
+                          style={{
+                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            border: 'none',
+                            borderRadius: '6px'
+                          }}
+                        >
+                          AI总结
+                        </Button>
+                      </div>
                     </div>
                   </Card>
                 </Col>
@@ -1834,6 +1906,161 @@ const DimensionStatistics = () => {
       }
     ];
 
+  // 渲染AI总结结果
+  const renderSummaryContent = () => {
+    if (summaryModal.loading) {
+      return (
+        <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+          <Spin size="large" />
+          <div style={{ marginTop: 16 }}>
+            <Text>AI正在分析Badcase原因，请稍候...</Text>
+          </div>
+        </div>
+      );
+    }
+
+    if (!summaryModal.data) {
+      return null;
+    }
+
+    const { summary, total_reasons } = summaryModal.data;
+
+    if (summary.parse_error) {
+      return (
+        <div>
+          <Alert
+            message="总结格式解析失败"
+            description="AI返回的内容格式不规范，以下是原始总结内容："
+            type="warning"
+            style={{ marginBottom: 16 }}
+          />
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: '16px', 
+            borderRadius: '8px',
+            whiteSpace: 'pre-wrap'
+          }}>
+            {summary.summary}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        {/* 概览信息 */}
+        <div style={{ marginBottom: 24, padding: '16px', background: '#f6f9fc', borderRadius: '8px' }}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Statistic
+                title="分析的原因总数"
+                value={total_reasons}
+                prefix={<BulbOutlined />}
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Col>
+            <Col span={12}>
+              <Statistic
+                title="识别的主要问题"
+                value={summary.main_issues ? summary.main_issues.length : 0}
+                prefix={<ExclamationCircleOutlined />}
+                valueStyle={{ color: '#ff4d4f' }}
+              />
+            </Col>
+          </Row>
+        </div>
+
+        {/* 整体总结 */}
+        {summary.summary && (
+          <div style={{ marginBottom: 24 }}>
+            <Title level={4}>📋 整体总结</Title>
+            <Alert
+              message={summary.summary}
+              type="info"
+              style={{ marginBottom: 16 }}
+            />
+          </div>
+        )}
+
+        {/* 主要问题类型 */}
+        {summary.main_issues && summary.main_issues.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <Title level={4}>🎯 主要问题类型</Title>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {summary.main_issues.map((issue, index) => (
+                <Card key={index} size="small" style={{ border: '1px solid #f0f0f0' }}>
+                  <Row gutter={16} align="middle">
+                    <Col span={16}>
+                      <div>
+                        <Text strong style={{ fontSize: '16px' }}>{issue.type}</Text>
+                        <div style={{ marginTop: 4 }}>
+                          <Text type="secondary">{issue.description}</Text>
+                        </div>
+                      </div>
+                    </Col>
+                    <Col span={8} style={{ textAlign: 'right' }}>
+                      <div>
+                        <Tag color={issue.severity === '高' ? 'red' : issue.severity === '中' ? 'orange' : 'green'}>
+                          {issue.severity}
+                        </Tag>
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <Text strong>{issue.percentage}</Text>
+                        <Text type="secondary" style={{ marginLeft: 4 }}>({issue.frequency})</Text>
+                      </div>
+                    </Col>
+                  </Row>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 根本原因 */}
+        {summary.root_causes && summary.root_causes.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <Title level={4}>🔍 根本原因分析</Title>
+            <ul style={{ paddingLeft: '20px' }}>
+              {summary.root_causes.map((cause, index) => (
+                <li key={index} style={{ marginBottom: '8px' }}>
+                  <Text>{cause}</Text>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 改进建议 */}
+        {summary.improvement_suggestions && summary.improvement_suggestions.length > 0 && (
+          <div>
+            <Title level={4}>💡 改进建议</Title>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {summary.improvement_suggestions.map((suggestion, index) => (
+                <Card key={index} size="small" style={{ border: '1px solid #e6f7ff', background: '#f6ffed' }}>
+                  <Row gutter={16}>
+                    <Col span={18}>
+                      <div>
+                        <Text strong>{suggestion.problem}</Text>
+                        <div style={{ marginTop: 4 }}>
+                          <Text>{suggestion.suggestion}</Text>
+                        </div>
+                      </div>
+                    </Col>
+                    <Col span={6} style={{ textAlign: 'right' }}>
+                      <Tag color={suggestion.priority === '高' ? 'red' : suggestion.priority === '中' ? 'orange' : 'blue'}>
+                        {suggestion.priority}优先级
+                      </Tag>
+                    </Col>
+                  </Row>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ marginBottom: 24 }}>
@@ -1866,6 +2093,27 @@ const DimensionStatistics = () => {
         type="card"
         items={tabItems}
       />
+
+      {/* AI总结Modal */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <RobotOutlined style={{ color: '#667eea' }} />
+            <span>AI Badcase原因总结 - {summaryModal.category}</span>
+          </div>
+        }
+        open={summaryModal.visible}
+        onCancel={closeSummaryModal}
+        footer={[
+          <Button key="close" onClick={closeSummaryModal}>
+            关闭
+          </Button>
+        ]}
+        width={800}
+        style={{ top: 20 }}
+      >
+        {renderSummaryContent()}
+      </Modal>
     </div>
   );
 };

@@ -71,5 +71,6 @@
 
 ---
 **版本标签**: v2.0.0  
-**Git提交**: [待更新]  
+**Git提交**: d8c7eadc2bee734bd349562cc19de11cd5c55655  
+**GitHub仓库**: https://github.com/owengbs/intelligent-qa-evaluator  
 **兼容性**: 与v1.x版本数据兼容 
