@@ -138,6 +138,7 @@ class EvaluationStandard(db.Model):
     reference_standard = db.Column(db.Text, nullable=False, comment='参考标准')
     scoring_principle = db.Column(db.Text, nullable=False, comment='打分原则')
     max_score = db.Column(db.Integer, default=5, comment='最高分数')
+    weight = db.Column(db.Float, default=1.0, comment='权重')
     is_default = db.Column(db.Boolean, default=False, comment='是否为默认标准')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
@@ -151,6 +152,7 @@ class EvaluationStandard(db.Model):
             'reference_standard': self.reference_standard,
             'scoring_principle': self.scoring_principle,
             'max_score': self.max_score,
+            'weight': self.weight,
             'is_default': self.is_default,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
@@ -165,6 +167,7 @@ class EvaluationStandard(db.Model):
             reference_standard=data.get('reference_standard'),
             scoring_principle=data.get('scoring_principle'),
             max_score=data.get('max_score', 5),
+            weight=data.get('weight', 1.0),
             is_default=data.get('is_default', False)
         )
     
@@ -201,6 +204,12 @@ class EvaluationHistory(db.Model):
     human_evaluation_time = db.Column(db.DateTime, comment='人工评估时间')
     is_human_modified = db.Column(db.Boolean, default=False, comment='是否经过人工修改')
     
+    # Badcase相关字段
+    is_badcase = db.Column(db.Boolean, default=False, comment='是否为badcase')
+    ai_is_badcase = db.Column(db.Boolean, default=False, comment='AI判断是否为badcase')
+    human_is_badcase = db.Column(db.Boolean, default=False, comment='人工判断是否为badcase')
+    badcase_reason = db.Column(db.Text, comment='badcase原因说明')
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
     
@@ -227,12 +236,31 @@ class EvaluationHistory(db.Model):
             except (json.JSONDecodeError, TypeError):
                 uploaded_images = []
         
+        # 安全地处理日期字段
+        def safe_datetime_format(dt_field):
+            if dt_field is None:
+                return None
+            try:
+                if hasattr(dt_field, 'isoformat'):
+                    return dt_field.isoformat()
+                elif isinstance(dt_field, (int, float)):
+                    # 如果是数字，尝试转换为datetime再格式化
+                    from datetime import datetime
+                    return datetime.fromtimestamp(dt_field).isoformat()
+                elif isinstance(dt_field, str):
+                    # 如果已经是字符串，直接返回
+                    return dt_field
+                else:
+                    return str(dt_field)
+            except (ValueError, OSError, TypeError):
+                return str(dt_field) if dt_field is not None else None
+        
         return {
             'id': self.id,
             'user_input': self.user_input,
             'model_answer': self.model_answer,
             'reference_answer': self.reference_answer,
-            'question_time': self.question_time.isoformat() if self.question_time else None,
+            'question_time': safe_datetime_format(self.question_time),
             'evaluation_criteria': self.evaluation_criteria,
             'total_score': self.total_score,
             'dimensions': dimensions,
@@ -250,11 +278,17 @@ class EvaluationHistory(db.Model):
             'human_dimensions': human_dimensions,
             'human_reasoning': self.human_reasoning,
             'human_evaluation_by': self.human_evaluation_by,
-            'human_evaluation_time': self.human_evaluation_time.isoformat() if self.human_evaluation_time else None,
+            'human_evaluation_time': safe_datetime_format(self.human_evaluation_time),
             'is_human_modified': self.is_human_modified,
             
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            # Badcase字段
+            'is_badcase': self.is_badcase,
+            'ai_is_badcase': self.ai_is_badcase,
+            'human_is_badcase': self.human_is_badcase,
+            'badcase_reason': self.badcase_reason,
+            
+            'created_at': safe_datetime_format(self.created_at),
+            'updated_at': safe_datetime_format(self.updated_at)
         }
     
     @classmethod
@@ -279,13 +313,15 @@ class EvaluationHistory(db.Model):
         question_time = None
         if 'question_time' in data and data['question_time']:
             if isinstance(data['question_time'], str):
-                try:
-                    question_time = datetime.fromisoformat(data['question_time'].replace('Z', '+00:00'))
-                except ValueError:
+                # 验证不是JSON字符串
+                if not data['question_time'].strip().startswith('{'):
                     try:
-                        question_time = datetime.strptime(data['question_time'], '%Y-%m-%d %H:%M:%S')
+                        question_time = datetime.fromisoformat(data['question_time'].replace('Z', '+00:00'))
                     except ValueError:
-                        question_time = None
+                        try:
+                            question_time = datetime.strptime(data['question_time'], '%Y-%m-%d %H:%M:%S')
+                        except ValueError:
+                            question_time = None
             elif isinstance(data['question_time'], datetime):
                 question_time = data['question_time']
         
@@ -293,13 +329,15 @@ class EvaluationHistory(db.Model):
         human_evaluation_time = None
         if 'human_evaluation_time' in data and data['human_evaluation_time']:
             if isinstance(data['human_evaluation_time'], str):
-                try:
-                    human_evaluation_time = datetime.fromisoformat(data['human_evaluation_time'].replace('Z', '+00:00'))
-                except ValueError:
+                # 验证不是JSON字符串
+                if not data['human_evaluation_time'].strip().startswith('{'):
                     try:
-                        human_evaluation_time = datetime.strptime(data['human_evaluation_time'], '%Y-%m-%d %H:%M:%S')
+                        human_evaluation_time = datetime.fromisoformat(data['human_evaluation_time'].replace('Z', '+00:00'))
                     except ValueError:
-                        human_evaluation_time = None
+                        try:
+                            human_evaluation_time = datetime.strptime(data['human_evaluation_time'], '%Y-%m-%d %H:%M:%S')
+                        except ValueError:
+                            human_evaluation_time = None
             elif isinstance(data['human_evaluation_time'], datetime):
                 human_evaluation_time = data['human_evaluation_time']
         
@@ -326,7 +364,13 @@ class EvaluationHistory(db.Model):
             human_reasoning=data.get('human_reasoning'),
             human_evaluation_by=data.get('human_evaluation_by'),
             human_evaluation_time=human_evaluation_time,
-            is_human_modified=data.get('is_human_modified', False)
+            is_human_modified=data.get('is_human_modified', False),
+            
+            # Badcase字段
+            is_badcase=data.get('is_badcase', False),
+            ai_is_badcase=data.get('ai_is_badcase', False),
+            human_is_badcase=data.get('human_is_badcase', False),
+            badcase_reason=data.get('badcase_reason', '')
         )
     
     def __repr__(self):

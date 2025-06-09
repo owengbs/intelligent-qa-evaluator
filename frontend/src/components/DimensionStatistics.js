@@ -45,12 +45,24 @@ const DimensionStatistics = () => {
   const fetchDimensionStatistics = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get('/dimension-statistics');
       
-      if (response.data.success) {
-        setStatisticsData(response.data.data);
+      // 并行获取维度统计和badcase统计
+      const [dimensionResponse, badcaseResponse] = await Promise.all([
+        api.get('/dimension-statistics'),
+        api.get('/badcase-statistics')
+      ]);
+      
+      if (dimensionResponse.data.success) {
+        const data = dimensionResponse.data.data;
+        
+        // 添加badcase统计数据
+        if (badcaseResponse.data.success) {
+          data.badcase_statistics = badcaseResponse.data.data;
+        }
+        
+        setStatisticsData(data);
       } else {
-        console.error('获取维度统计失败:', response.data.message);
+        console.error('获取维度统计失败:', dimensionResponse.data.message);
       }
     } catch (error) {
       console.error('获取维度统计失败:', error);
@@ -1382,6 +1394,181 @@ const DimensionStatistics = () => {
     );
   };
 
+  // 渲染badcase分析页面
+  const renderBadcaseAnalysis = () => {
+    if (!statisticsData.badcase_statistics) {
+      return (
+        <div style={{ textAlign: 'center', padding: '50px' }}>
+          <Empty description="暂无Badcase统计数据" />
+        </div>
+      );
+    }
+    
+    const badcaseData = statisticsData.badcase_statistics;
+    const { overall, by_category } = badcaseData;
+    
+    // 获取百分比对应的状态
+    const getBadcaseStatus = (percentage) => {
+      if (percentage <= 5) return { text: '质量优秀', color: 'success', icon: '✅' };
+      if (percentage <= 15) return { text: '质量一般', color: 'warning', icon: '⚠️' };
+      return { text: '需要关注', color: 'error', icon: '🚨' };
+    };
+    
+    const overallStatus = getBadcaseStatus(overall.total_badcase_percentage);
+    
+    return (
+      <div>
+        {/* 总体Badcase统计 */}
+        <Row gutter={[16, 16]} style={{ marginBottom: 32 }}>
+          <Col xs={24} sm={6}>
+            <Card style={{ textAlign: 'center', borderRadius: '12px' }}>
+              <Statistic
+                title="总评估记录"
+                value={overall.total_records}
+                valueStyle={{ color: '#1890ff' }}
+                prefix="📊"
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={6}>
+            <Card style={{ textAlign: 'center', borderRadius: '12px' }}>
+              <Statistic
+                title="Badcase总数"
+                value={overall.total_badcases}
+                valueStyle={{ color: '#ff4d4f' }}
+                prefix="🚨"
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={6}>
+            <Card style={{ textAlign: 'center', borderRadius: '12px' }}>
+              <Statistic
+                title="AI判断Badcase"
+                value={overall.ai_badcases}
+                suffix={`(${overall.ai_badcase_percentage}%)`}
+                valueStyle={{ color: '#faad14' }}
+                prefix="🤖"
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={6}>
+            <Card style={{ textAlign: 'center', borderRadius: '12px' }}>
+              <Statistic
+                title="人工标记Badcase"
+                value={overall.human_badcases}
+                suffix={`(${overall.human_badcase_percentage}%)`}
+                valueStyle={{ color: '#722ed1' }}
+                prefix="👤"
+              />
+            </Card>
+          </Col>
+        </Row>
+        
+        {/* 总体质量评估 */}
+        <Card style={{ marginBottom: 24 }}>
+          <Row gutter={16} align="middle">
+            <Col span={12}>
+              <Progress
+                type="circle"
+                percent={overall.total_badcase_percentage}
+                status={overallStatus.color}
+                format={(percent) => `${percent}%`}
+                width={120}
+                strokeColor={overallStatus.color === 'error' ? '#ff4d4f' : overallStatus.color === 'warning' ? '#faad14' : '#52c41a'}
+              />
+            </Col>
+            <Col span={12}>
+              <div>
+                <Title level={4} style={{ margin: 0 }}>
+                  {overallStatus.icon} 系统质量评估
+                </Title>
+                <div style={{ marginTop: 8 }}>
+                  <Tag color={overallStatus.color} style={{ fontSize: '14px' }}>
+                    {overallStatus.text}
+                  </Tag>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <Text type="secondary">
+                    总计 {overall.total_records} 条记录中有 {overall.total_badcases} 条Badcase
+                  </Text>
+                </div>
+              </div>
+            </Col>
+          </Row>
+        </Card>
+        
+        {/* 各分类Badcase统计 */}
+        <Card title="各分类Badcase统计">
+          <Row gutter={[16, 16]}>
+            {Object.entries(by_category).map(([category, stats]) => {
+              const categoryStatus = getBadcaseStatus(stats.badcase_percentage);
+              
+              return (
+                <Col xs={24} sm={12} md={8} lg={6} key={category}>
+                  <Card
+                    size="small"
+                    style={{
+                      background: categoryStatus.color === 'error' ? 
+                        'linear-gradient(135deg, #fff2f0 0%, #ffffff 100%)' :
+                        categoryStatus.color === 'warning' ?
+                        'linear-gradient(135deg, #fffbe6 0%, #ffffff 100%)' :
+                        'linear-gradient(135deg, #f6ffed 0%, #ffffff 100%)',
+                      border: categoryStatus.color === 'error' ? 
+                        '1px solid #ffccc7' :
+                        categoryStatus.color === 'warning' ?
+                        '1px solid #ffe58f' :
+                        '1px solid #d9f7be'
+                    }}
+                  >
+                    <div style={{ textAlign: 'center' }}>
+                      <Title level={5} style={{ margin: '0 0 8px 0' }}>
+                        {category}
+                      </Title>
+                      <div style={{ margin: '12px 0' }}>
+                        <Text style={{ fontSize: '24px', fontWeight: 'bold', color: categoryStatus.color === 'error' ? '#ff4d4f' : categoryStatus.color === 'warning' ? '#faad14' : '#52c41a' }}>
+                          {stats.badcase_percentage.toFixed(1)}%
+                        </Text>
+                      </div>
+                      <div>
+                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                          {stats.badcase_count}/{stats.total_records} 条
+                        </Text>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <Tag color={categoryStatus.color} size="small">
+                          {categoryStatus.icon} {categoryStatus.text}
+                        </Tag>
+                      </div>
+                    </div>
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        </Card>
+        
+        {/* 质量评估说明 */}
+        <Card style={{ marginTop: 16 }}>
+          <Title level={5}>质量评估标准</Title>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Tag color="success">✅ 质量优秀</Tag>
+              <Text type="secondary">Badcase率 ≤ 5%</Text>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Tag color="warning">⚠️ 质量一般</Tag>
+              <Text type="secondary">Badcase率 5% - 15%</Text>
+            </div>
+                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+               <Tag color="error">🚨 需要关注</Tag>
+               <Text type="secondary">Badcase率 &gt; 15%</Text>
+             </div>
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
   // 渲染单一数据源的分类详情（AI或人工）
   const renderSingleSourceCategoryDetail = (categoryData, themeColor) => {
     if (!categoryData || !categoryData.dimensions) {
@@ -1597,43 +1784,55 @@ const DimensionStatistics = () => {
     );
   }
 
-  // 构建标签页
-  const tabItems = [
-    {
-      key: 'overview',
-      label: '总览',
-      children: renderOverview()
-    },
-    {
-      key: 'ai_evaluation',
-      label: (
-        <span>
-          🤖 AI评估
-          {summary.ai_total_evaluations > 0 && (
-            <Badge count={summary.ai_total_evaluations} style={{ marginLeft: 8 }} />
-          )}
-        </span>
-      ),
-      children: renderAIEvaluation()
-    },
-    {
-      key: 'human_evaluation',
-      label: (
-        <span>
-          👤 人工评估
-          {summary.human_total_evaluations > 0 && (
-            <Badge count={summary.human_total_evaluations} style={{ marginLeft: 8 }} />
-          )}
-        </span>
-      ),
-      children: renderHumanEvaluation()
-    },
-    {
-      key: 'summary',
-      label: '数据汇总',
-      children: renderSummary()
-    }
-  ];
+      // 构建标签页
+    const tabItems = [
+      {
+        key: 'overview',
+        label: '总览',
+        children: renderOverview()
+      },
+      {
+        key: 'ai_evaluation',
+        label: (
+          <span>
+            🤖 AI评估
+            {summary.ai_total_evaluations > 0 && (
+              <Badge count={summary.ai_total_evaluations} style={{ marginLeft: 8 }} />
+            )}
+          </span>
+        ),
+        children: renderAIEvaluation()
+      },
+      {
+        key: 'human_evaluation',
+        label: (
+          <span>
+            👤 人工评估
+            {summary.human_total_evaluations > 0 && (
+              <Badge count={summary.human_total_evaluations} style={{ marginLeft: 8 }} />
+            )}
+          </span>
+        ),
+        children: renderHumanEvaluation()
+      },
+      {
+        key: 'badcase_analysis',
+        label: (
+          <span>
+            🚨 Badcase分析
+            {statisticsData.badcase_statistics && statisticsData.badcase_statistics.overall.total_badcases > 0 && (
+              <Badge count={statisticsData.badcase_statistics.overall.total_badcases} style={{ marginLeft: 8 }} />
+            )}
+          </span>
+        ),
+        children: renderBadcaseAnalysis()
+      },
+      {
+        key: 'summary',
+        label: '数据汇总',
+        children: renderSummary()
+      }
+    ];
 
   return (
     <div style={{ padding: '24px' }}>

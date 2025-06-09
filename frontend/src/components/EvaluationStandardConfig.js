@@ -55,17 +55,59 @@ const EvaluationStandardConfig = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [viewingDimension, setViewingDimension] = useState(null);
   const [activeTab, setActiveTab] = useState('选股');
+  const [categoryOptions, setCategoryOptions] = useState([]);
 
-  // 二级分类选项
-  const categoryOptions = [
-    '选股',
-    '宏观经济分析',
-    '大盘行业分析',
-    '个股分析',
-    '个股决策',
-    '信息查询',
-    '无效问题'
-  ];
+  // 加载分类选项
+  const loadCategoryOptions = useCallback(async () => {
+    try {
+      console.log('🔧 Loading classification standards from:', `${API_BASE_URL}/classification-standards`);
+      
+      const response = await api.get('/classification-standards');
+      if (response.data.standards) {
+        // 从分类标准中提取唯一的二级分类
+        const uniqueCategories = [...new Set(response.data.standards.map(item => item.level2))];
+        const sortedCategories = uniqueCategories.sort();
+        
+        setCategoryOptions(sortedCategories);
+        console.log('🔧 Category options loaded:', sortedCategories);
+        
+        // 如果当前activeTab不在新的分类列表中，设置为第一个分类
+        if (!sortedCategories.includes(activeTab) && sortedCategories.length > 0) {
+          setActiveTab(sortedCategories[0]);
+        }
+      } else {
+        console.warn('未能获取分类标准');
+        // 使用备用的默认分类
+        const fallbackCategories = [
+          '选股',
+          '宏观经济分析',
+          '大盘行业分析',
+          '个股分析',
+          '个股决策',
+          '知识问答',
+          '事实及指标类检索',
+          '客服及交易',
+          '无效问题（非金融问题）'
+        ];
+        setCategoryOptions(fallbackCategories);
+      }
+    } catch (error) {
+      console.error('加载分类选项失败:', error);
+      // 使用备用的默认分类
+      const fallbackCategories = [
+        '选股',
+        '宏观经济分析', 
+        '大盘行业分析',
+        '个股分析',
+        '个股决策',
+        '知识问答',
+        '事实及指标类检索',
+        '客服及交易',
+        '无效问题（非金融问题）'
+      ];
+      setCategoryOptions(fallbackCategories);
+    }
+  }, [activeTab]);
 
   // 层次选项
   const layerOptions = [
@@ -144,9 +186,10 @@ const EvaluationStandardConfig = () => {
   }, []);
 
   useEffect(() => {
+    loadCategoryOptions();
     loadDimensions();
     loadSelectedStandards();
-  }, [loadDimensions, loadSelectedStandards]);
+  }, [loadCategoryOptions, loadDimensions, loadSelectedStandards]);
 
   // 显示选择标准模态框
   const showSelectModal = () => {

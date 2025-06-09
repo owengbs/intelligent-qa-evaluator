@@ -8,7 +8,8 @@ import {
   RobotOutlined,
   SettingOutlined,
   TagsOutlined,
-  ControlOutlined
+  ControlOutlined,
+  WarningOutlined
 } from '@ant-design/icons';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
@@ -18,6 +19,7 @@ import DimensionStatistics from './components/DimensionStatistics';
 import ClassificationConfig from './components/ClassificationConfig';
 import EvaluationStandardConfig from './components/EvaluationStandardConfig';
 import DimensionManagement from './components/DimensionManagement';
+import BadcaseManagement from './components/BadcaseManagement';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -65,6 +67,12 @@ function AppLayout() {
       icon: <ControlOutlined />,
       label: '维度管理',
       path: '/dimensions'
+    },
+    {
+      key: '7',
+      icon: <WarningOutlined />,
+      label: 'Badcase管理',
+      path: '/badcase'
     }
   ], []);
 
@@ -157,6 +165,7 @@ function AppLayout() {
               <Route path="/classification" element={<ClassificationConfig />} />
               <Route path="/standards" element={<EvaluationStandardConfig />} />
               <Route path="/dimensions" element={<DimensionManagement />} />
+              <Route path="/badcase" element={<BadcaseManagement />} />
             </Routes>
           </Content>
         </Layout>

@@ -144,37 +144,26 @@ class EvaluationService:
     def _parse_evaluation_result(self, evaluation_text):
         """
         解析大模型返回的评估结果
-        提取总分和评分理由
+        现在只提取各维度分数，总分由加权平均计算
         """
         try:
-            # 使用正则表达式提取总分
-            score_pattern = r'总分[：:]\s*(\d+(?:\.\d+)?)\s*/\s*10'
-            score_match = re.search(score_pattern, evaluation_text)
-            
-            if score_match:
-                score = float(score_match.group(1))
-            else:
-                # 备用模式
-                score_pattern_alt = r'(\d+(?:\.\d+)?)\s*/\s*10'
-                score_match_alt = re.search(score_pattern_alt, evaluation_text)
-                score = float(score_match_alt.group(1)) if score_match_alt else 0.0
-            
             # 提取评分理由
             reasoning_pattern = r'评分理由[：:]?\s*(.+)'
             reasoning_match = re.search(reasoning_pattern, evaluation_text, re.DOTALL)
             reasoning = reasoning_match.group(1).strip() if reasoning_match else evaluation_text
             
-            # 尝试提取各维度分数 (可选功能)
+            # 提取各维度分数
             dimensions = self._extract_dimension_scores(evaluation_text)
             
+            # 总分现在由后续的加权平均计算，这里暂设为0
             result = {
-                'score': min(max(score, 0), 10),  # 确保分数在0-10范围内
+                'score': 0.0,  # 将由calculate_weighted_score方法计算
                 'reasoning': reasoning,
                 'dimensions': dimensions,
                 'raw_response': evaluation_text
             }
             
-            self.logger.info(f"解析结果 - 总分: {result['score']}")
+            self.logger.info(f"解析完成 - 提取到 {len(dimensions)} 个维度分数")
             return result
             
         except Exception as e:
@@ -187,7 +176,7 @@ class EvaluationService:
             }
     
     def _extract_dimension_scores(self, text):
-        """动态提取各维度评分"""
+        """动态提取各维度评分，明确排除总分"""
         dimensions = {}
         
         # 首先查找"各维度评分:"部分
@@ -218,8 +207,19 @@ class EvaluationService:
                         dimension_name = match.group(1).strip()
                         score = float(match.group(2))
                         
+                        # 明确排除"总分"相关内容
+                        if self._is_total_score_dimension(dimension_name):
+                            self.logger.info(f"排除总分维度: {dimension_name}")
+                            break
+                        
                         # 标准化维度名称映射
                         dimension_key = self._normalize_dimension_name(dimension_name)
+                        
+                        # 再次检查标准化后的名称
+                        if self._is_total_score_dimension(dimension_key):
+                            self.logger.info(f"排除标准化后的总分维度: {dimension_key}")
+                            break
+                        
                         dimensions[dimension_key] = score
                         
                         self.logger.debug(f"提取维度分数: {dimension_name} -> {dimension_key} = {score}")
@@ -235,6 +235,10 @@ class EvaluationService:
             }
             
             for dimension_name, patterns in new_dimension_patterns.items():
+                # 确保这些维度不是总分
+                if self._is_total_score_dimension(dimension_name):
+                    continue
+                    
                 for pattern in patterns:
                     match = re.search(pattern, text)
                     if match:
@@ -244,6 +248,28 @@ class EvaluationService:
         
         self.logger.info(f"成功提取 {len(dimensions)} 个维度分数: {list(dimensions.keys())}")
         return dimensions
+    
+    def _is_total_score_dimension(self, dimension_name):
+        """判断是否为总分相关的维度名称"""
+        if not dimension_name:
+            return False
+            
+        # 清理维度名称
+        clean_name = dimension_name.strip('[](){}').strip().lower()
+        
+        # 总分相关的关键词
+        total_score_keywords = [
+            '总分', '总体分数', '总体评分', '整体分数', '整体评分',
+            'total', 'total_score', 'overall', 'overall_score',
+            'final', 'final_score', 'sum', 'summary'
+        ]
+        
+        # 检查是否包含总分关键词
+        for keyword in total_score_keywords:
+            if keyword in clean_name:
+                return True
+        
+        return False
     
     def _normalize_dimension_name(self, dimension_name):
         """标准化维度名称为新维度体系的名称"""
@@ -283,6 +309,94 @@ class EvaluationService:
         
         # 如果没有找到映射，直接返回原名称（保持中文）
         return clean_name if clean_name else 'unknown_dimension'
+    
+    def calculate_weighted_score(self, dimensions, level2_category, db_connection=None):
+        """
+        根据维度分数和权重计算加权平均总分
+        
+        Args:
+            dimensions: 各维度的评分字典
+            level2_category: 二级分类名称
+            db_connection: 数据库连接
+            
+        Returns:
+            float: 加权平均总分（百分比形式，0-100）
+        """
+        if not dimensions:
+            return 100.0  # 默认100%
+            
+        try:
+            # 从数据库获取该分类下各维度的权重和最大分数
+            if db_connection is None:
+                import sqlite3
+                db_connection = sqlite3.connect('database/qa_evaluation.db')
+                should_close = True
+            else:
+                should_close = False
+                
+            cursor = db_connection.cursor()
+            
+            # 查询该分类下的维度权重和最大分数
+            cursor.execute("""
+                SELECT dimension, weight, max_score 
+                FROM evaluation_standards 
+                WHERE level2_category = ?
+            """, (level2_category,))
+            
+            dimension_configs = {}
+            for row in cursor.fetchall():
+                dimension_name, weight, max_score = row
+                dimension_configs[dimension_name] = {
+                    'weight': weight or 1.0,
+                    'max_score': max_score or 2
+                }
+            
+            if should_close:
+                db_connection.close()
+            
+            if not dimension_configs:
+                self.logger.warning(f"未找到分类 {level2_category} 的维度配置，使用等权重")
+                # 等权重处理
+                total_weight = len(dimensions)
+                weighted_sum = 0.0
+                for dimension, score in dimensions.items():
+                    # 假设最大分数为2
+                    percentage = (score / 2.0) * 100
+                    weighted_sum += percentage
+                return weighted_sum / total_weight if total_weight > 0 else 100.0
+            
+            # 计算加权平均
+            total_weighted_score = 0.0
+            total_weight = 0.0
+            
+            for dimension, score in dimensions.items():
+                config = dimension_configs.get(dimension)
+                if config:
+                    weight = config['weight']
+                    max_score = config['max_score']
+                    # 计算该维度的百分比分数
+                    percentage = (score / max_score) * 100
+                    # 加权
+                    total_weighted_score += percentage * weight
+                    total_weight += weight
+                else:
+                    # 如果维度不在配置中，使用默认权重和最大分数
+                    self.logger.warning(f"维度 {dimension} 不在配置中，使用默认值")
+                    weight = 1.0
+                    max_score = 2.0
+                    percentage = (score / max_score) * 100
+                    total_weighted_score += percentage * weight
+                    total_weight += weight
+            
+            # 计算最终的加权平均分数
+            final_score = total_weighted_score / total_weight if total_weight > 0 else 100.0
+            
+            self.logger.info(f"加权平均计算完成: {final_score:.2f}%")
+            return min(max(final_score, 0.0), 100.0)  # 确保在0-100范围内
+            
+        except Exception as e:
+            self.logger.error(f"计算加权平均分数时发生错误: {str(e)}")
+            return 100.0  # 出错时返回默认值
 
     def evaluate_qa(self, user_input, model_answer, evaluation_criteria, question_time=None, prompt_template=None):
         """
@@ -352,10 +466,9 @@ class EvaluationService:
 
 严格评分要求：
 1. 严格按照上述评估标准进行评分，不得放宽标准
-2. 必须按照每个维度分别评分，然后计算总分
-3. 每个维度都要给出具体分数和理由
-4. 总分为各维度分数之和
-5. 评分应趋向保守，只有真正优秀的回答才能获得高分
+2. 必须按照每个维度分别评分，给出具体分数和理由
+3. 评分应趋向保守，只有真正优秀的回答才能获得高分
+4. 无需计算总分，总分将根据各维度分数的加权平均自动计算
 
 评估信息：
 问题时间: {question_time}
@@ -367,15 +480,13 @@ class EvaluationService:
 各维度评分:
 [请根据上述评估标准中的具体维度进行评分，每个维度都要有具体分数和理由]
 
-总分: [各维度分数之和]/10
-
 评分理由: [综合说明各维度的评分依据和总体评价]
 
 注意事项：
 1. 必须为评估标准中的每个维度都给出具体分数
 2. 分数必须在该维度的最大分数范围内
 3. 评分格式请使用：维度名称: [分数] 分 - [评分理由]
-4. 各维度分数相加即为总分"""
+4. 不要给出总分，系统将自动计算加权平均分数"""
     
     def _replace_variables(self, template, variables):
         """替换模板中的变量"""

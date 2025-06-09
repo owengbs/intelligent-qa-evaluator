@@ -114,3 +114,18 @@ temp/
 database/
 data/
 instance/
+
+# Backups
+backups/
+*.tar.gz
+*.zip
+
+# Import and debug scripts
+backend/import_*.py
+backend/debug_*.py
+backend/test_*.py
+backend/fix_*.py
+backend/check_*.py
+backend/*_import*.py
+backend/simple_*.py
+backend/reload_*.py

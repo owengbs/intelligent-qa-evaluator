@@ -72,7 +72,12 @@ class EvaluationHistoryService:
                 'evaluation_time_seconds': evaluation_data.get('evaluation_time_seconds'),
                 'model_used': evaluation_data.get('model_used'),
                 'raw_response': evaluation_data.get('raw_response'),
-                'uploaded_images': evaluation_data.get('uploaded_images', [])  # 添加图片信息
+                'uploaded_images': evaluation_data.get('uploaded_images', []),  # 添加图片信息
+                # 添加badcase相关字段
+                'is_badcase': evaluation_data.get('is_badcase', False),
+                'ai_is_badcase': evaluation_data.get('ai_is_badcase', False),
+                'human_is_badcase': evaluation_data.get('human_is_badcase', False),
+                'badcase_reason': evaluation_data.get('badcase_reason', '')
             }
             
             # 如果有分类结果，添加分类信息
@@ -142,17 +147,25 @@ class EvaluationHistoryService:
             
             if start_date:
                 try:
-                    start_dt = datetime.fromisoformat(start_date)
-                    query = query.filter(EvaluationHistory.created_at >= start_dt)
-                except ValueError:
-                    self.logger.warning(f"无效的开始日期格式: {start_date}")
+                    # 验证start_date是字符串且不是JSON
+                    if isinstance(start_date, str) and not start_date.strip().startswith('{'):
+                        start_dt = datetime.fromisoformat(start_date)
+                        query = query.filter(EvaluationHistory.created_at >= start_dt)
+                    else:
+                        self.logger.warning(f"无效的开始日期格式: {start_date}")
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"无效的开始日期格式: {start_date}, 错误: {e}")
             
             if end_date:
                 try:
-                    end_dt = datetime.fromisoformat(end_date)
-                    query = query.filter(EvaluationHistory.created_at <= end_dt)
-                except ValueError:
-                    self.logger.warning(f"无效的结束日期格式: {end_date}")
+                    # 验证end_date是字符串且不是JSON
+                    if isinstance(end_date, str) and not end_date.strip().startswith('{'):
+                        end_dt = datetime.fromisoformat(end_date)
+                        query = query.filter(EvaluationHistory.created_at <= end_dt)
+                    else:
+                        self.logger.warning(f"无效的结束日期格式: {end_date}")
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"无效的结束日期格式: {end_date}, 错误: {e}")
             
             # 添加排序
             if hasattr(EvaluationHistory, sort_by):
@@ -171,8 +184,15 @@ class EvaluationHistoryService:
                 error_out=False
             )
             
-            # 格式化结果
-            items = [item.to_dict() for item in pagination.items]
+            # 格式化结果 - 安全处理每个记录的转换
+            items = []
+            for item in pagination.items:
+                try:
+                    items.append(item.to_dict())
+                except Exception as e:
+                    self.logger.warning(f"转换记录到字典时出错 (ID: {getattr(item, 'id', 'unknown')}): {str(e)}")
+                    # 跳过有问题的记录，继续处理其他记录
+                    continue
             
             result = {
                 'success': True,
@@ -220,9 +240,22 @@ class EvaluationHistoryService:
                     'message': '评估记录不存在'
                 }
             
+            try:
+                data = history.to_dict()
+            except Exception as e:
+                self.logger.warning(f"转换记录到字典时出错 (ID: {history.id}): {str(e)}")
+                # 返回基本信息而不是完整的字典
+                data = {
+                    'id': history.id,
+                    'user_input': getattr(history, 'user_input', ''),
+                    'model_answer': getattr(history, 'model_answer', ''),
+                    'total_score': getattr(history, 'total_score', 0),
+                    'error': f'记录格式错误: {str(e)}'
+                }
+            
             return {
                 'success': True,
-                'data': history.to_dict()
+                'data': data
             }
             
         except SQLAlchemyError as e:
@@ -300,6 +333,15 @@ class EvaluationHistoryService:
             if 'human_reasoning' in human_data:
                 history.human_reasoning = human_data['human_reasoning']
             
+            # 更新badcase相关字段
+            if 'human_is_badcase' in human_data:
+                history.human_is_badcase = human_data['human_is_badcase']
+                # 更新总的badcase状态（AI或人工任一判断为badcase即为badcase）
+                history.is_badcase = history.ai_is_badcase or history.human_is_badcase
+            
+            if 'badcase_reason' in human_data:
+                history.badcase_reason = human_data['badcase_reason']
+            
             # 设置评估者和时间
             history.human_evaluation_by = evaluator_name
             history.human_evaluation_time = datetime.utcnow()
@@ -312,10 +354,16 @@ class EvaluationHistoryService:
             
             self.logger.info(f"成功更新人工评估，记录ID: {history_id}, 评估者: {evaluator_name}")
             
+            try:
+                data = history.to_dict()
+            except Exception as e:
+                self.logger.warning(f"转换更新后的记录到字典时出错 (ID: {history.id}): {str(e)}")
+                data = {'id': history.id, 'error': f'记录格式错误: {str(e)}'}
+            
             return {
                 'success': True,
                 'message': '人工评估更新成功',
-                'data': history.to_dict()
+                'data': data
             }
             
         except SQLAlchemyError as e:
@@ -446,63 +494,69 @@ class EvaluationHistoryService:
             human_category_stats = {}
             
             for evaluation in evaluations:
-                category = evaluation.classification_level2
-                
-                # 处理AI评估数据
-                if evaluation.dimensions_json:
-                    if category not in ai_category_stats:
-                        ai_category_stats[category] = {
-                            'total_evaluations': 0,
-                            'dimensions': {}
-                        }
+                try:
+                    category = evaluation.classification_level2
                     
-                    ai_category_stats[category]['total_evaluations'] += 1
-                    
-                    try:
-                        ai_dimensions = json.loads(evaluation.dimensions_json)
-                        self.logger.debug(f"解析到AI维度数据: {ai_dimensions}")
+                    # 处理AI评估数据
+                    if evaluation.dimensions_json:
+                        if category not in ai_category_stats:
+                            ai_category_stats[category] = {
+                                'total_evaluations': 0,
+                                'dimensions': {}
+                            }
                         
-                        for dimension_key, score in ai_dimensions.items():
-                            if dimension_key not in ai_category_stats[category]['dimensions']:
-                                max_score = self._get_dimension_max_score_from_standards(
-                                    dimension_key, category, standards_data, evaluation.evaluation_criteria
-                                )
-                                ai_category_stats[category]['dimensions'][dimension_key] = {
-                                    'scores': [],
-                                    'max_possible_score': max_score
-                                }
-                            ai_category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
-                            
-                    except (json.JSONDecodeError, TypeError) as e:
-                        self.logger.warning(f"解析AI维度数据失败: {str(e)}")
-                
-                # 处理人工评估数据
-                if evaluation.human_dimensions_json:
-                    if category not in human_category_stats:
-                        human_category_stats[category] = {
-                            'total_evaluations': 0,
-                            'dimensions': {}
-                        }
-                    
-                    human_category_stats[category]['total_evaluations'] += 1
-                    
-                    try:
-                        human_dimensions = json.loads(evaluation.human_dimensions_json)
-                        self.logger.debug(f"解析到人工维度数据: {human_dimensions}")
+                        ai_category_stats[category]['total_evaluations'] += 1
                         
-                        for dimension_key, score in human_dimensions.items():
-                            if dimension_key not in human_category_stats[category]['dimensions']:
-                                max_score = self._get_dimension_max_score_from_standards(
-                                    dimension_key, category, standards_data, evaluation.evaluation_criteria
-                                )
-                                human_category_stats[category]['dimensions'][dimension_key] = {
-                                    'scores': [],
-                                    'max_possible_score': max_score
-                                }
-                            human_category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
+                        try:
+                            ai_dimensions = json.loads(evaluation.dimensions_json)
+                            self.logger.debug(f"解析到AI维度数据: {ai_dimensions}")
                             
-                    except (json.JSONDecodeError, TypeError) as e:
-                        self.logger.warning(f"解析人工维度数据失败: {str(e)}")
+                            for dimension_key, score in ai_dimensions.items():
+                                if dimension_key not in ai_category_stats[category]['dimensions']:
+                                    max_score = self._get_dimension_max_score_from_standards(
+                                        dimension_key, category, standards_data, evaluation.evaluation_criteria
+                                    )
+                                    ai_category_stats[category]['dimensions'][dimension_key] = {
+                                        'scores': [],
+                                        'max_possible_score': max_score
+                                    }
+                                ai_category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
+                                
+                        except (json.JSONDecodeError, TypeError) as e:
+                            self.logger.warning(f"解析AI维度数据失败: {str(e)}")
+                    
+                    # 处理人工评估数据
+                    if evaluation.human_dimensions_json:
+                        if category not in human_category_stats:
+                            human_category_stats[category] = {
+                                'total_evaluations': 0,
+                                'dimensions': {}
+                            }
+                        
+                        human_category_stats[category]['total_evaluations'] += 1
+                        
+                        try:
+                            human_dimensions = json.loads(evaluation.human_dimensions_json)
+                            self.logger.debug(f"解析到人工维度数据: {human_dimensions}")
+                            
+                            for dimension_key, score in human_dimensions.items():
+                                if dimension_key not in human_category_stats[category]['dimensions']:
+                                    max_score = self._get_dimension_max_score_from_standards(
+                                        dimension_key, category, standards_data, evaluation.evaluation_criteria
+                                    )
+                                    human_category_stats[category]['dimensions'][dimension_key] = {
+                                        'scores': [],
+                                        'max_possible_score': max_score
+                                    }
+                                human_category_stats[category]['dimensions'][dimension_key]['scores'].append(score)
+                                
+                        except (json.JSONDecodeError, TypeError) as e:
+                            self.logger.warning(f"解析人工维度数据失败: {str(e)}")
+                            
+                except Exception as e:
+                    # 捕获任何在处理单个记录时发生的错误，包括fromisoformat错误
+                    self.logger.warning(f"处理评估记录时出错 (ID: {getattr(evaluation, 'id', 'unknown')}): {str(e)}")
+                    continue
             
             # 计算AI评估统计数据
             ai_result_stats = self._calculate_dimension_stats(ai_category_stats, standards_data, "AI")
@@ -721,4 +775,133 @@ class EvaluationHistoryService:
             for key in distribution:
                 distribution[key] = round((distribution[key] / total) * 100, 1)
         
-        return distribution 
+        return distribution
+    
+    def get_badcase_statistics(self):
+        """
+        获取badcase统计信息
+        
+        Returns:
+            dict: badcase统计结果
+        """
+        try:
+            # 总体badcase统计
+            total_records = EvaluationHistory.query.count()
+            total_badcases = EvaluationHistory.query.filter_by(is_badcase=True).count()
+            ai_badcases = EvaluationHistory.query.filter_by(ai_is_badcase=True).count()
+            human_badcases = EvaluationHistory.query.filter_by(human_is_badcase=True).count()
+            
+            # 按分类统计badcase
+            category_stats = {}
+            categories = db.session.query(EvaluationHistory.classification_level2).distinct().all()
+            
+            for (category,) in categories:
+                if category:
+                    category_total = EvaluationHistory.query.filter_by(classification_level2=category).count()
+                    category_badcases = EvaluationHistory.query.filter(
+                        EvaluationHistory.classification_level2 == category,
+                        EvaluationHistory.is_badcase == True
+                    ).count()
+                    
+                    category_stats[category] = {
+                        'total_records': category_total,
+                        'badcase_count': category_badcases,
+                        'badcase_percentage': round((category_badcases / category_total * 100), 2) if category_total > 0 else 0.0
+                    }
+            
+            # 计算总体百分比
+            total_badcase_percentage = round((total_badcases / total_records * 100), 2) if total_records > 0 else 0.0
+            ai_badcase_percentage = round((ai_badcases / total_records * 100), 2) if total_records > 0 else 0.0
+            human_badcase_percentage = round((human_badcases / total_records * 100), 2) if total_records > 0 else 0.0
+            
+            result = {
+                'success': True,
+                'data': {
+                    'overall': {
+                        'total_records': total_records,
+                        'total_badcases': total_badcases,
+                        'ai_badcases': ai_badcases,
+                        'human_badcases': human_badcases,
+                        'total_badcase_percentage': total_badcase_percentage,
+                        'ai_badcase_percentage': ai_badcase_percentage,
+                        'human_badcase_percentage': human_badcase_percentage
+                    },
+                    'by_category': category_stats
+                }
+            }
+            
+            self.logger.info(f"获取badcase统计成功: 总记录{total_records}条，badcase{total_badcases}条({total_badcase_percentage}%)")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取badcase统计失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f'获取badcase统计失败: {str(e)}'
+            }
+    
+    def get_badcase_records(self, page=1, per_page=20, badcase_type=None, classification_level2=None):
+        """
+        获取badcase记录列表
+        
+        Args:
+            page: 页码
+            per_page: 每页记录数
+            badcase_type: badcase类型 ('ai', 'human', 'all')
+            classification_level2: 二级分类筛选
+            
+        Returns:
+            dict: badcase记录列表
+        """
+        try:
+            # 构建查询条件
+            query = EvaluationHistory.query.filter_by(is_badcase=True)
+            
+            # 按badcase类型筛选
+            if badcase_type == 'ai':
+                query = query.filter_by(ai_is_badcase=True)
+            elif badcase_type == 'human':
+                query = query.filter_by(human_is_badcase=True)
+            # badcase_type == 'all' 或者为空时，不添加额外筛选条件
+            
+            # 按分类筛选
+            if classification_level2:
+                query = query.filter_by(classification_level2=classification_level2)
+            
+            # 按创建时间降序排列
+            query = query.order_by(EvaluationHistory.created_at.desc())
+            
+            # 分页
+            pagination = query.paginate(
+                page=page,
+                per_page=per_page,
+                error_out=False
+            )
+            
+            # 转换为字典格式
+            records = [record.to_dict() for record in pagination.items]
+            
+            result = {
+                'success': True,
+                'data': {
+                    'items': records,
+                    'pagination': {
+                        'page': pagination.page,
+                        'per_page': pagination.per_page,
+                        'total': pagination.total,
+                        'pages': pagination.pages,
+                        'has_prev': pagination.has_prev,
+                        'has_next': pagination.has_next
+                    }
+                }
+            }
+            
+            self.logger.info(f"获取badcase记录成功: 第{page}页，每页{per_page}条，共{pagination.total}条")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取badcase记录失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f'获取badcase记录失败: {str(e)}'
+            } 

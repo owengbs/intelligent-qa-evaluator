@@ -17,7 +17,12 @@ import {
   Tooltip,
   Empty,
   Spin,
-  Image
+  Image,
+  Form,
+  Input,
+  InputNumber,
+  Switch,
+  Divider
 } from 'antd';
 import {
   EyeOutlined,
@@ -61,10 +66,16 @@ const EvaluationHistory = () => {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [statisticsData, setStatisticsData] = useState(null);
   const [statisticsLoading, setStatisticsLoading] = useState(false);
+  
+  // 编辑相关状态
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm] = Form.useForm();
+  const [editData, setEditData] = useState(null);
 
-  // 分类选项
+  // 分类选项 - 基于数据库实际分类
   const categoryOptions = [
-    '选股', '宏观经济分析', '大盘行业分析', '个股分析', '个股决策', '信息查询', '无效问题'
+    '个股决策', '个股分析', '事实检索', '客服咨询', '大盘行业分析', 
+    '宏观经济分析', '开户咨询', '知识咨询', '选股'
   ];
 
   // 获取评估历史数据
@@ -157,6 +168,66 @@ const EvaluationHistory = () => {
   const handleViewDetail = (record) => {
     setSelectedRecord(record);
     setDetailModalVisible(true);
+    setIsEditing(false);
+    setEditData(null);
+  };
+
+  // 开始编辑
+  const handleStartEdit = () => {
+    const initialData = {
+      human_total_score: selectedRecord.human_total_score || 0,
+      human_dimensions: selectedRecord.human_dimensions || {},
+      human_is_badcase: selectedRecord.human_is_badcase || false,
+      badcase_reason: selectedRecord.badcase_reason || ''
+    };
+    
+    setEditData(initialData);
+    setIsEditing(true);
+    
+    // 设置表单初值
+    editForm.setFieldsValue(initialData);
+  };
+
+  // 取消编辑
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditData(null);
+    editForm.resetFields();
+  };
+
+  // 保存编辑
+  const handleSaveEdit = async (values) => {
+    try {
+      // 计算总分
+      const dimensionScores = Object.values(values.human_dimensions || {});
+      const totalScore = dimensionScores.reduce((sum, score) => sum + (score || 0), 0);
+      
+      const updateData = {
+        ...values,
+        human_total_score: totalScore
+      };
+
+      const response = await api.put(`/evaluation-history/${selectedRecord.id}/human-evaluation`, updateData);
+      
+      if (response.data.success) {
+        message.success('更新成功');
+        setIsEditing(false);
+        setEditData(null);
+        
+        // 更新当前记录
+        const updatedRecord = { ...selectedRecord, ...updateData };
+        setSelectedRecord(updatedRecord);
+        
+        // 刷新列表数据
+        fetchHistoryData(pagination.current, pagination.pageSize);
+        fetchStatistics();
+      } else {
+        message.error('更新失败');
+      }
+    } catch (error) {
+      console.error('更新失败:', error);
+      message.error('更新失败');
+    }
   };
 
   // 获取评分等级颜色
@@ -383,21 +454,33 @@ const EvaluationHistory = () => {
     },
     {
       title: '总分',
-      dataIndex: 'total_score',
+      dataIndex: 'human_total_score',
       key: 'total_score',
-      width: 100,
+      width: 120,
       sorter: true,
-      render: (score) => {
-        const level = getScoreLevel(score);
+      render: (humanScore, record) => {
+        // 优先显示人工评分，没有则显示AI评分
+        const displayScore = humanScore !== null && humanScore !== undefined ? humanScore : record.total_score;
+        const isHumanScore = humanScore !== null && humanScore !== undefined;
+        const level = getScoreLevel(displayScore);
+        
         return (
           <Space direction="vertical" size={2}>
-            <Text style={{ 
-              color: getScoreColor(score),
-              fontWeight: 'bold',
-              fontSize: '16px'
-            }}>
-              {score}/10
-            </Text>
+            <Space>
+              <Text style={{ 
+                color: getScoreColor(displayScore),
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }}>
+                {displayScore}/10
+              </Text>
+              {isHumanScore && (
+                <Text style={{ fontSize: '12px', color: '#722ed1' }}>👨‍💼</Text>
+              )}
+              {!isHumanScore && (
+                <Text style={{ fontSize: '12px', color: '#1890ff' }}>🤖</Text>
+              )}
+            </Space>
             <Tag color={level.color} size="small">
               {level.text}
             </Tag>
@@ -406,57 +489,113 @@ const EvaluationHistory = () => {
       }
     },
     {
-      title: '维度评分',
-      dataIndex: 'dimensions',
-      key: 'dimensions',
-      width: 200,
-      render: (dimensions, record) => {
-        if (!dimensions || Object.keys(dimensions).length === 0) {
-          return <Text type="secondary">无维度数据</Text>;
-        }
-        
-        return (
-          <Space wrap size={4}>
-            {Object.entries(dimensions).slice(0, 3).map(([key, value]) => (
-              <Tag key={key} size="small">
-                {getDimensionDisplayName(key, record.classification_level2)}: {value}
-              </Tag>
-            ))}
-            {Object.keys(dimensions).length > 3 && (
-              <Tag size="small">+{Object.keys(dimensions).length - 3}</Tag>
-            )}
-          </Space>
-        );
-      }
-    },
-    {
-      title: '人工评估',
-      dataIndex: 'human_total_score',
-      key: 'human_evaluation',
+      title: 'Badcase状态',
+      dataIndex: 'is_badcase',
+      key: 'badcase_status',
       width: 120,
-      render: (humanScore, record) => {
-        if (humanScore !== null && humanScore !== undefined) {
+      align: 'center',
+      render: (isBadcase, record) => {
+        if (isBadcase) {
           return (
             <Space direction="vertical" size={2}>
-              <Text style={{ 
-                color: getScoreColor(humanScore),
-                fontWeight: 'bold',
-                fontSize: '14px'
-              }}>
-                👨‍💼 {humanScore}/10
-              </Text>
-              <Tag color="purple" size="small">
-                已人工评估
+              <Tag color="red" style={{ fontSize: '12px' }}>
+                🚨 Badcase
               </Tag>
+              <div style={{ fontSize: '10px' }}>
+                {record.ai_is_badcase && (
+                  <Tag color="orange" size="small">AI</Tag>
+                )}
+                {record.human_is_badcase && (
+                  <Tag color="purple" size="small">人工</Tag>
+                )}
+              </div>
             </Space>
           );
         } else {
           return (
-            <Tag color="default" size="small">
-              仅AI评估
+            <Tag color="green" size="small">
+              ✅ 正常
             </Tag>
           );
         }
+      },
+      filters: [
+        { text: '正常记录', value: false },
+        { text: 'Badcase', value: true }
+      ],
+      onFilter: (value, record) => record.is_badcase === value
+    },
+    {
+      title: '维度评分',
+      dataIndex: 'human_dimensions',
+      key: 'dimensions',
+      width: 280,
+      render: (humanDimensions, record) => {
+        // 优先显示人工维度评分，没有则显示AI维度评分
+        const displayDimensions = (humanDimensions && Object.keys(humanDimensions).length > 0) 
+          ? humanDimensions 
+          : record.dimensions;
+        const isHumanDimensions = humanDimensions && Object.keys(humanDimensions).length > 0;
+        
+        if (!displayDimensions || Object.keys(displayDimensions).length === 0) {
+          return <Text type="secondary">无维度数据</Text>;
+        }
+        
+        return (
+          <div style={{ lineHeight: '1.2' }}>
+            <Space wrap size={4} style={{ marginBottom: '4px' }}>
+              {Object.entries(displayDimensions).map(([key, value]) => (
+                <Tag 
+                  key={key} 
+                  size="small"
+                  color={isHumanDimensions ? 'purple' : 'blue'}
+                  style={{ margin: '1px' }}
+                >
+                  {getDimensionDisplayName(key, record.classification_level2)}: {value}
+                </Tag>
+              ))}
+            </Space>
+            <div>
+              <Text style={{ fontSize: '10px', color: '#666' }}>
+                {isHumanDimensions ? '👨‍💼 人工评分' : '🤖 AI评分'}
+              </Text>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      title: '评估状态',
+      dataIndex: 'human_total_score',
+      key: 'evaluation_status',
+      width: 100,
+      align: 'center',
+      render: (humanScore, record) => {
+        const hasHumanScore = humanScore !== null && humanScore !== undefined;
+        const hasHumanDimensions = record.human_dimensions && Object.keys(record.human_dimensions).length > 0;
+        
+        if (hasHumanScore || hasHumanDimensions) {
+          return (
+            <Tag color="purple" size="small">
+              👨‍💼 人工评估
+            </Tag>
+          );
+        } else {
+          return (
+            <Tag color="blue" size="small">
+              🤖 AI评估
+            </Tag>
+          );
+        }
+      },
+      filters: [
+        { text: '人工评估', value: 'human' },
+        { text: 'AI评估', value: 'ai' }
+      ],
+      onFilter: (value, record) => {
+        const hasHuman = (record.human_total_score !== null && record.human_total_score !== undefined) ||
+                        (record.human_dimensions && Object.keys(record.human_dimensions).length > 0);
+        return value === 'human' ? hasHuman : !hasHuman;
       }
     },
     {
@@ -579,15 +718,30 @@ const EvaluationHistory = () => {
   // 渲染详情模态框
   const renderDetailModal = () => (
     <Modal
-      title="评估详情"
+      title={isEditing ? "编辑评估结果" : "评估详情"}
       open={detailModalVisible}
-      onCancel={() => setDetailModalVisible(false)}
-      width={900}
-      footer={[
-        <Button key="close" onClick={() => setDetailModalVisible(false)}>
-          关闭
-        </Button>
-      ]}
+      onCancel={() => {
+        setDetailModalVisible(false);
+        handleCancelEdit();
+      }}
+      width={1000}
+      footer={
+        isEditing ? [
+          <Button key="cancel" onClick={handleCancelEdit}>
+            取消
+          </Button>,
+          <Button key="save" type="primary" onClick={() => editForm.submit()}>
+            保存
+          </Button>
+        ] : [
+          <Button key="edit" type="primary" onClick={handleStartEdit}>
+            编辑评估
+          </Button>,
+          <Button key="close" onClick={() => setDetailModalVisible(false)}>
+            关闭
+          </Button>
+        ]
+      }
     >
       {selectedRecord && (
         <div>
@@ -730,8 +884,95 @@ const EvaluationHistory = () => {
               </Card>
             </Col>
 
+            {/* Badcase信息 */}
+            <Col span={24}>
+              <Card 
+                size="small" 
+                title={
+                  <Space>
+                    {selectedRecord.is_badcase ? (
+                      <>
+                        <span style={{ fontSize: '16px' }}>🚨</span>
+                        Badcase标记信息
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: '16px' }}>✅</span>
+                        质量评估正常
+                      </>
+                    )}
+                  </Space>
+                }
+                style={{
+                  background: selectedRecord.is_badcase 
+                    ? 'linear-gradient(135deg, #fff2f0 0%, #ffffff 100%)' 
+                    : 'linear-gradient(135deg, #f6ffed 0%, #ffffff 100%)',
+                  border: selectedRecord.is_badcase 
+                    ? '1px solid #ffccc7' 
+                    : '1px solid #d9f7be'
+                }}
+              >
+                <Row gutter={[16, 16]}>
+                  <Col span={8}>
+                    <Text strong>总体状态: </Text>
+                    {selectedRecord.is_badcase ? (
+                      <Tag color="red" style={{ fontSize: '12px' }}>
+                        🚨 Badcase
+                      </Tag>
+                    ) : (
+                      <Tag color="green" style={{ fontSize: '12px' }}>
+                        ✅ 正常
+                      </Tag>
+                    )}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>AI判断: </Text>
+                    {selectedRecord.ai_is_badcase ? (
+                      <Tag color="orange" style={{ fontSize: '12px' }}>
+                        Badcase
+                      </Tag>
+                    ) : (
+                      <Tag color="green" style={{ fontSize: '12px' }}>
+                        正常
+                      </Tag>
+                    )}
+                  </Col>
+                  <Col span={8}>
+                    <Text strong>人工标记: </Text>
+                    {selectedRecord.human_is_badcase ? (
+                      <Tag color="purple" style={{ fontSize: '12px' }}>
+                        Badcase
+                      </Tag>
+                    ) : (
+                      <Tag color="green" style={{ fontSize: '12px' }}>
+                        正常
+                      </Tag>
+                    )}
+                  </Col>
+                  
+                  {/* Badcase原因说明 */}
+                  {selectedRecord.badcase_reason && (
+                    <Col span={24}>
+                      <Text strong style={{ color: '#ff4d4f' }}>Badcase原因:</Text>
+                      <Paragraph style={{ 
+                        marginTop: 8,
+                        padding: '12px',
+                        background: '#fff2f0',
+                        borderRadius: '6px',
+                        border: '1px solid #ffccc7',
+                        whiteSpace: 'pre-line',
+                        lineHeight: 1.6
+                      }}>
+                        {selectedRecord.badcase_reason}
+                      </Paragraph>
+                    </Col>
+                  )}
+                </Row>
+              </Card>
+            </Col>
+
             {/* 人工评估信息 */}
-            {(selectedRecord.human_total_score !== null && selectedRecord.human_total_score !== undefined) && (
+            {(selectedRecord.human_total_score !== null && selectedRecord.human_total_score !== undefined || isEditing) && (
               <Col span={24}>
                 <Card 
                   size="small" 
@@ -745,21 +986,103 @@ const EvaluationHistory = () => {
                     background: 'linear-gradient(135deg, #f0f2ff 0%, #ffffff 100%)',
                     border: '1px solid #d6e4ff'
                   }}
-                >
-                  <Row gutter={[16, 16]}>
-                    <Col span={12}>
-                      <Text strong>人工评估总分: </Text>
-                      <Text style={{ 
-                        color: getScoreColor(selectedRecord.human_total_score),
-                        fontWeight: 'bold',
-                        fontSize: '18px'
-                      }}>
-                        {selectedRecord.human_total_score}/10
-                      </Text>
-                      <Tag color={getScoreLevel(selectedRecord.human_total_score).color} style={{ marginLeft: 8 }}>
-                        {getScoreLevel(selectedRecord.human_total_score).text}
-                      </Tag>
-                    </Col>
+                                >
+                  {isEditing ? (
+                    <Form
+                      form={editForm}
+                      layout="vertical"
+                      onFinish={handleSaveEdit}
+                      initialValues={editData}
+                    >
+                      <Row gutter={[16, 16]}>
+                        {/* 维度评分编辑 */}
+                        <Col span={24}>
+                          <Text strong style={{ color: '#1890ff', marginBottom: 16, display: 'block' }}>
+                            维度评分:
+                          </Text>
+                          <Row gutter={[12, 12]}>
+                            {Object.keys(selectedRecord.dimensions || {}).map((dimensionKey) => (
+                              <Col xs={12} sm={8} md={6} key={dimensionKey}>
+                                <Form.Item
+                                  name={['human_dimensions', dimensionKey]}
+                                  label={getDimensionDisplayName(dimensionKey, selectedRecord.classification_level2)}
+                                  rules={[
+                                    { required: true, message: '请输入评分' },
+                                    { type: 'number', min: 0, max: 5, message: '评分范围0-5' }
+                                  ]}
+                                >
+                                  <InputNumber
+                                    min={0}
+                                    max={5}
+                                    step={0.1}
+                                    precision={1}
+                                    style={{ width: '100%' }}
+                                    placeholder="0-5分"
+                                  />
+                                </Form.Item>
+                              </Col>
+                            ))}
+                          </Row>
+                        </Col>
+
+                        {/* Badcase标记编辑 */}
+                        <Col span={24}>
+                          <Divider />
+                          <Row gutter={[16, 16]}>
+                            <Col span={12}>
+                              <Form.Item
+                                name="human_is_badcase"
+                                label="Badcase标记"
+                                valuePropName="checked"
+                              >
+                                <Switch
+                                  checkedChildren="是Badcase"
+                                  unCheckedChildren="正常"
+                                />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item
+                                name="badcase_reason"
+                                label="Badcase原因"
+                                rules={[
+                                  {
+                                    validator: (_, value) => {
+                                      const isBadcase = editForm.getFieldValue('human_is_badcase');
+                                      if (isBadcase && !value) {
+                                        return Promise.reject('标记为Badcase时必须填写原因');
+                                      }
+                                      return Promise.resolve();
+                                    }
+                                  }
+                                ]}
+                              >
+                                <Input.TextArea
+                                  placeholder="请详细说明Badcase的具体原因..."
+                                  rows={3}
+                                  disabled={!editForm.getFieldValue('human_is_badcase')}
+                                />
+                              </Form.Item>
+                            </Col>
+                          </Row>
+                        </Col>
+                      </Row>
+                    </Form>
+                  ) : (
+                    <Row gutter={[16, 16]}>
+                      <Col span={12}>
+                        <Text strong>人工评估总分: </Text>
+                        <Text style={{ 
+                          color: getScoreColor(selectedRecord.human_total_score),
+                          fontWeight: 'bold',
+                          fontSize: '18px'
+                        }}>
+                          {selectedRecord.human_total_score}/10
+                        </Text>
+                        <Tag color={getScoreLevel(selectedRecord.human_total_score).color} style={{ marginLeft: 8 }}>
+                          {getScoreLevel(selectedRecord.human_total_score).text}
+                        </Tag>
+                      </Col>
                     <Col span={12}>
                       <Text strong>评估者: </Text>
                       <Text>{selectedRecord.evaluator_name || '评估专家'}</Text>
@@ -851,7 +1174,8 @@ const EvaluationHistory = () => {
                         </Paragraph>
                       </Col>
                     )}
-                  </Row>
+                    </Row>
+                  )}
                 </Card>
               </Col>
             )}

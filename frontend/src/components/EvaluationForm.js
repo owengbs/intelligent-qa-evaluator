@@ -23,7 +23,8 @@ import {
   InputNumber,
   Upload,
   Image,
-  Tooltip
+  Tooltip,
+  Checkbox
 } from 'antd';
 import { 
   ClearOutlined, 
@@ -755,7 +756,10 @@ ${dimensionRequirements}
       const initialValues = {
         human_total_score: result.score,
         human_reasoning: '',
-        evaluator_name: '评估专家'
+        evaluator_name: '评估专家',
+        ai_is_badcase: result.ai_is_badcase || false,
+        human_is_badcase: false,
+        badcase_reason: ''
       };
       
       // 为每个维度初始化分数
@@ -800,7 +804,9 @@ ${dimensionRequirements}
       const humanData = {
         human_total_score: values.human_total_score,
         human_reasoning: values.human_reasoning,
-        evaluator_name: values.evaluator_name || '评估专家'
+        evaluator_name: values.evaluator_name || '评估专家',
+        human_is_badcase: values.human_is_badcase || false,
+        badcase_reason: values.badcase_reason || ''
       };
       
       // 收集各维度分数
@@ -917,6 +923,55 @@ ${dimensionRequirements}
             result={result}
           />
           
+          {/* Badcase标记 */}
+          <Divider orientation="left">Badcase标记</Divider>
+          <Row gutter={[16, 16]}>
+            <Col span={12}>
+              <Form.Item
+                label="AI判断"
+                name="ai_is_badcase"
+                valuePropName="checked"
+              >
+                <Checkbox disabled>
+                  {result.ai_is_badcase ? '是Badcase' : '非Badcase'}
+                </Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="人工判断"
+                name="human_is_badcase"
+                valuePropName="checked"
+              >
+                <Checkbox>
+                  标记为Badcase
+                </Checkbox>
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item
+                label="Badcase原因说明"
+                name="badcase_reason"
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      const humanIsBadcase = humanForm.getFieldValue('human_is_badcase');
+                      if (humanIsBadcase && !value) {
+                        return Promise.reject(new Error('标记为Badcase时必须说明原因'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
+                <TextArea
+                  rows={3}
+                  placeholder="如果标记为Badcase，请详细说明原因..."
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item
             label="人工评估意见"
             name="human_reasoning"
@@ -1292,6 +1347,22 @@ ${dimensionRequirements}
                   {scoreLevel.text}
                 </Tag>
               </Col>
+              {result.weighted_score && (
+                <Col>
+                  <Tooltip title="基于各维度权重计算的百分比分数">
+                    <Tag color="blue" style={{ fontSize: '12px' }}>
+                      加权分数: {result.weighted_score.toFixed(1)}%
+                    </Tag>
+                  </Tooltip>
+                </Col>
+              )}
+              {result.ai_is_badcase && (
+                <Col>
+                  <Tag color="red" style={{ fontSize: '12px' }}>
+                    🚨 AI判断: Badcase
+                  </Tag>
+                </Col>
+              )}
             </Row>
           </Col>
           

@@ -176,6 +176,66 @@ class EvaluationStandardService:
             self.logger.error(f"批量更新评估标准失败: {str(e)}")
             raise e
     
+    def update_dimension_weights(self, level2_category, weight_updates):
+        """
+        更新指定分类下各维度的权重
+        
+        Args:
+            level2_category: 二级分类名称
+            weight_updates: 权重更新数据，格式为 {dimension_name: weight}
+            
+        Returns:
+            dict: 更新结果
+        """
+        try:
+            updated_count = 0
+            
+            for dimension_name, weight in weight_updates.items():
+                # 验证权重值
+                if not isinstance(weight, (int, float)) or weight < 0:
+                    raise ValueError(f"维度 {dimension_name} 的权重值无效: {weight}")
+                
+                # 更新权重
+                standards = EvaluationStandard.query.filter_by(
+                    level2_category=level2_category,
+                    dimension=dimension_name
+                ).all()
+                
+                for standard in standards:
+                    standard.weight = float(weight)
+                    standard.updated_at = datetime.utcnow()
+                    updated_count += 1
+            
+            db.session.commit()
+            
+            self.logger.info(f"成功更新分类 {level2_category} 下 {updated_count} 个维度的权重")
+            return {
+                'success': True,
+                'message': f'权重更新成功，共更新 {updated_count} 个维度',
+                'updated_count': updated_count
+            }
+            
+        except ValueError as e:
+            self.logger.warning(f"更新权重验证失败: {str(e)}")
+            return {
+                'success': False,
+                'message': str(e)
+            }
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            self.logger.error(f"更新权重失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f"数据库操作失败: {str(e)}"
+            }
+        except Exception as e:
+            db.session.rollback()
+            self.logger.error(f"更新权重时发生错误: {str(e)}")
+            return {
+                'success': False,
+                'message': f"更新权重失败: {str(e)}"
+            }
+    
     def get_evaluation_standards_grouped_by_category(self):
         """按分类分组获取评估标准"""
         try:

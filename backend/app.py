@@ -181,12 +181,30 @@ def evaluate():
             evaluation_criteria=evaluation_criteria
         )
         
+        # 计算加权平均总分
+        if result.get('dimensions') and classification_result and classification_result.get('level2'):
+            try:
+                weighted_score = evaluation_service.calculate_weighted_score(
+                    result['dimensions'], 
+                    classification_result['level2']
+                )
+                result['score'] = weighted_score / 10.0  # 转换为10分制显示，但内部存储为百分比
+                result['weighted_score'] = weighted_score  # 保存百分比形式的分数
+                logger.info(f"计算加权平均分数: {weighted_score:.2f}% -> 显示分数: {result['score']:.2f}/10")
+            except Exception as e:
+                logger.error(f"计算加权平均分数失败: {str(e)}")
+                # 使用原有分数作为备用
+        
         # 添加分类信息到评估结果
         if classification_result:
             result['classification'] = classification_result
         
         # 添加模型使用信息
         result['model_used'] = 'deepseek-chat'  # 记录使用的模型
+        
+        # AI自动判断是否为badcase（基于分数阈值）
+        ai_badcase_threshold = 50.0  # 低于50%认为是badcase
+        result['ai_is_badcase'] = (result.get('weighted_score', 100.0) < ai_badcase_threshold)
         
         # 保存评估结果到历史记录
         try:
@@ -197,13 +215,15 @@ def evaluate():
                 'reference_answer': reference_answer,
                 'question_time': question_time,
                 'evaluation_criteria_used': evaluation_criteria,
-                'score': result.get('score'),
+                'score': result.get('weighted_score', result.get('score', 0)) / 10.0,  # 保存为10分制
                 'dimensions': result.get('dimensions', {}),
                 'reasoning': result.get('reasoning'),
                 'evaluation_time_seconds': result.get('evaluation_time_seconds'),
                 'model_used': result.get('model_used'),
                 'raw_response': result.get('raw_response'),
-                'uploaded_images': uploaded_images  # 添加图片信息
+                'uploaded_images': uploaded_images,  # 添加图片信息
+                'ai_is_badcase': result.get('ai_is_badcase', False),  # AI判断的badcase
+                'is_badcase': result.get('ai_is_badcase', False)  # 初始设置为AI判断结果
             }
             
             # 保存到历史记录
@@ -636,6 +656,69 @@ def get_dimension_statistics():
     except Exception as e:
         logger.error(f"获取维度统计失败: {str(e)}")
         return jsonify({'error': f'获取维度统计失败: {str(e)}'}), 500
+
+@app.route('/api/badcase-statistics', methods=['GET'])
+def get_badcase_statistics():
+    """获取badcase统计信息"""
+    try:
+        logger.info("获取badcase统计信息")
+        
+        result = evaluation_history_service.get_badcase_statistics()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取badcase统计失败: {str(e)}")
+        return jsonify({'error': f'获取badcase统计失败: {str(e)}'}), 500
+
+@app.route('/api/badcase-records', methods=['GET'])
+def get_badcase_records():
+    """获取所有badcase记录"""
+    try:
+        logger.info("获取badcase记录列表")
+        
+        # 获取查询参数
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        badcase_type = request.args.get('badcase_type')  # 'ai', 'human', 'all'
+        classification_level2 = request.args.get('classification_level2')
+        
+        result = evaluation_history_service.get_badcase_records(
+            page=page,
+            per_page=per_page,
+            badcase_type=badcase_type,
+            classification_level2=classification_level2
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取badcase记录失败: {str(e)}")
+        return jsonify({'error': f'获取badcase记录失败: {str(e)}'}), 500
+
+@app.route('/api/evaluation-standards/<category>/weights', methods=['PUT'])
+def update_dimension_weights(category):
+    """更新指定分类下各维度的权重"""
+    try:
+        logger.info(f"更新分类 {category} 的维度权重")
+        
+        data = request.get_json()
+        
+        if not data or 'weights' not in data:
+            return jsonify({'error': '缺少权重数据'}), 400
+        
+        weight_updates = data['weights']
+        
+        result = evaluation_standard_service.update_dimension_weights(category, weight_updates)
+        
+        if result['success']:
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+        
+    except Exception as e:
+        logger.error(f"更新维度权重失败: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ==================== 错误处理 ==================== 
 
