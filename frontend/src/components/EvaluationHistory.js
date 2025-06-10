@@ -72,11 +72,8 @@ const EvaluationHistory = () => {
   const [editForm] = Form.useForm();
   const [editData, setEditData] = useState(null);
 
-  // 分类选项 - 基于数据库实际分类
-  const categoryOptions = [
-    '个股决策', '个股分析', '事实检索', '客服咨询', '大盘行业分析', 
-    '宏观经济分析', '开户咨询', '知识咨询', '选股'
-  ];
+  // 动态分类选项
+  const [categoryOptions, setCategoryOptions] = useState([]);
 
   // 获取评估历史数据
   const fetchHistoryData = useCallback(async (page = 1, pageSize = 20) => {
@@ -135,11 +132,30 @@ const EvaluationHistory = () => {
     }
   }, []);
 
+  // 获取分类选项
+  const fetchCategories = useCallback(async () => {
+    try {
+      const response = await api.get('/categories');
+      
+      if (response.data.success && response.data.data.categories) {
+        setCategoryOptions(response.data.data.categories);
+      }
+    } catch (error) {
+      console.error('获取分类选项失败:', error);
+      // 如果API失败，使用默认分类
+      setCategoryOptions([
+        '个股决策', '个股分析', '事实检索', '客服咨询', '大盘行业分析', 
+        '宏观经济分析', '知识咨询', '选股'
+      ]);
+    }
+  }, []);
+
   // 初始化数据
   useEffect(() => {
     fetchHistoryData();
     fetchStatistics();
-  }, [fetchHistoryData, fetchStatistics]);
+    fetchCategories();
+  }, [fetchHistoryData, fetchStatistics, fetchCategories]);
 
   // 当筛选条件改变时重新获取数据
   useEffect(() => {

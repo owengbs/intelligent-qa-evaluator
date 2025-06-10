@@ -906,12 +906,13 @@ class EvaluationHistoryService:
                 'message': f'获取badcase记录失败: {str(e)}'
             }
     
-    def get_badcase_reasons_by_category(self, category):
+    def get_badcase_reasons_by_category(self, category, reason_type='human'):
         """
-        获取指定分类下所有badcase的原因汇总
+        获取指定分类下badcase的原因汇总
         
         Args:
             category: 分类名称
+            reason_type: 原因类型 ('human', 'ai', 'all')，默认为 'human'
             
         Returns:
             dict: badcase原因列表
@@ -925,23 +926,43 @@ class EvaluationHistoryService:
             
             reasons = []
             for record in badcase_records:
-                # 收集AI判断的badcase原因
-                if record.ai_is_badcase and record.ai_badcase_reason:
-                    reasons.append({
-                        'type': 'ai',
-                        'reason': record.ai_badcase_reason,
-                        'record_id': record.id,
-                        'question': record.question_text[:100] + '...' if len(record.question_text) > 100 else record.question_text
-                    })
+                # 根据类型选择正确的原因字段和进行过滤
+                reason_text = None
+                badcase_type = None
                 
-                # 收集人工标记的badcase原因
-                if record.human_is_badcase and record.human_badcase_reason:
-                    reasons.append({
-                        'type': 'human',
-                        'reason': record.human_badcase_reason,
-                        'record_id': record.id,
-                        'question': record.question_text[:100] + '...' if len(record.question_text) > 100 else record.question_text
-                    })
+                if reason_type == 'human':
+                    # 只处理有人工评估原因的记录
+                    if record.human_reasoning and record.human_is_badcase:
+                        reason_text = record.human_reasoning
+                        badcase_type = 'human'
+                elif reason_type == 'ai':
+                    # 只处理有AI评估原因的记录
+                    if record.badcase_reason and record.ai_is_badcase:
+                        reason_text = record.badcase_reason
+                        badcase_type = 'ai'
+                elif reason_type == 'all':
+                    # 处理所有有原因的记录，优先人工原因
+                    if record.human_reasoning and record.human_is_badcase:
+                        reason_text = record.human_reasoning
+                        badcase_type = 'human'
+                    elif record.badcase_reason and record.ai_is_badcase:
+                        reason_text = record.badcase_reason
+                        badcase_type = 'ai'
+                
+                # 如果没有找到合适的原因，跳过这条记录
+                if not reason_text:
+                    continue
+                
+                # 安全地获取问题文本
+                question_text = getattr(record, 'user_input', '') or getattr(record, 'question_text', '') or ''
+                question_preview = question_text[:100] + '...' if len(question_text) > 100 else question_text
+                
+                reasons.append({
+                    'type': badcase_type,
+                    'reason': reason_text,
+                    'record_id': record.id,
+                    'question': question_preview
+                })
             
             result = {
                 'success': True,
@@ -953,7 +974,7 @@ class EvaluationHistoryService:
                 }
             }
             
-            self.logger.info(f"获取分类 {category} 的badcase原因成功: {len(reasons)}条原因")
+            self.logger.info(f"获取分类 {category} 的badcase原因成功: {len(reasons)}条原因 (类型: {reason_type})")
             return result
             
         except Exception as e:
@@ -961,4 +982,43 @@ class EvaluationHistoryService:
             return {
                 'success': False,
                 'message': f'获取分类badcase原因失败: {str(e)}'
-            } 
+            }
+    
+    def get_categories(self):
+        """
+        获取所有分类选项
+        
+        Returns:
+            dict: 分类选项列表
+        """
+        try:
+            # 从数据库中获取所有不为空的分类
+            categories = db.session.query(EvaluationHistory.classification_level2).filter(
+                EvaluationHistory.classification_level2.isnot(None),
+                EvaluationHistory.classification_level2 != ''
+            ).distinct().all()
+            
+            # 提取分类名称并排序
+            category_list = [category[0] for category in categories if category[0]]
+            category_list.sort()
+            
+            result = {
+                'success': True,
+                'data': {
+                    'categories': category_list,
+                    'total': len(category_list)
+                }
+            }
+            
+            self.logger.info(f"获取分类选项成功: {len(category_list)}个分类")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取分类选项失败: {str(e)}")
+            return {
+                'success': False,
+                'message': f'获取分类选项失败: {str(e)}'
+            }
+
+# 全局实例
+evaluation_history_service = EvaluationHistoryService() 

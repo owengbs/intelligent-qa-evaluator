@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
 """
-AI总结服务 - 使用DeepSeek V3进行Badcase原因归纳总结
+AI总结服务 - 使用Venus接口的DeepSeek R1进行Badcase原因归纳总结
 """
 
-import requests
 import json
 import os
 from utils.logger import get_logger
+from services.llm_client import LLMClient
 
 class AISummaryService:
     def __init__(self):
         self.logger = get_logger(__name__)
-        # DeepSeek API配置
-        self.api_url = "https://api.deepseek.com/chat/completions"
-        self.api_key = os.getenv('DEEPSEEK_API_KEY', '')
-        
-        if not self.api_key:
-            self.logger.warning("DEEPSEEK_API_KEY 环境变量未设置，AI总结功能将无法使用")
+        # 使用系统现有的Venus接口
+        self.llm_client = LLMClient()
+        self.logger.info("AI总结服务初始化完成，使用Venus接口")
     
     def summarize_badcase_reasons(self, category, reasons_data):
         """
-        使用DeepSeek V3对badcase原因进行归纳总结
+        使用Venus接口的DeepSeek R1对badcase原因进行归纳总结
         
         Args:
             category: 分类名称
@@ -30,35 +27,34 @@ class AISummaryService:
             dict: 总结结果
         """
         try:
-            if not self.api_key:
-                return {
-                    'success': False,
-                    'message': 'DeepSeek API密钥未配置，请联系管理员'
-                }
+            # 统计原因类型
+            total_reasons = len(reasons_data['reasons'])
+            human_reasons_count = len([r for r in reasons_data['reasons'] if r['type'] == 'human'])
+            ai_reasons_count = len([r for r in reasons_data['reasons'] if r['type'] == 'ai'])
             
-            # 构建prompt
+            self.logger.info(f"开始分析分类 {category} 的badcase原因: 总数{total_reasons}条 (人工{human_reasons_count}条, AI{ai_reasons_count}条), 仅使用人工评估的原因")
+            
+            # 构建prompt - 仅基于人工评估的原因
             prompt = self._build_summary_prompt(category, reasons_data)
             
-            # 调用DeepSeek API
-            response = self._call_deepseek_api(prompt)
+            # 调用Venus接口，使用summary任务类型（会自动选择deepseek-r1-local-II模型）
+            summary_text = self.llm_client.dialog(prompt, task_type='summary')
             
-            if response['success']:
-                summary_text = response['data']
-                
-                # 解析总结结果
-                parsed_summary = self._parse_summary_result(summary_text)
-                
-                return {
-                    'success': True,
-                    'data': {
-                        'category': category,
-                        'total_reasons': len(reasons_data['reasons']),
-                        'summary': parsed_summary,
-                        'raw_summary': summary_text
-                    }
+            # 解析总结结果
+            parsed_summary = self._parse_summary_result(summary_text)
+            
+            # 计算实际使用的人工评估原因数
+            human_reasons_count = len([r for r in reasons_data['reasons'] if r['type'] == 'human'])
+            
+            return {
+                'success': True,
+                'data': {
+                    'category': category,
+                    'total_reasons': human_reasons_count,  # 只统计人工评估的原因数
+                    'summary': parsed_summary,
+                    'raw_summary': summary_text
                 }
-            else:
-                return response
+            }
                 
         except Exception as e:
             self.logger.error(f"AI总结失败: {str(e)}")
@@ -68,48 +64,44 @@ class AISummaryService:
             }
     
     def _build_summary_prompt(self, category, reasons_data):
-        """构建用于AI总结的prompt"""
+        """构建用于AI总结的prompt，仅基于人工评估的badcase原因"""
         reasons = reasons_data['reasons']
         
-        # 按类型分组原因
-        ai_reasons = [r['reason'] for r in reasons if r['type'] == 'ai']
+        # 只使用人工标记的原因
         human_reasons = [r['reason'] for r in reasons if r['type'] == 'human']
         
-        prompt = f"""请对以下{category}分类下的Badcase原因进行专业的归纳总结分析：
+        prompt = f"""你是一个专业的质量分析专家，擅长分析问答系统的质量问题并提供改进建议。请严格按照要求的JSON格式输出结果。
+
+请对以下{category}分类下的人工评估Badcase原因进行专业的归纳总结分析：
 
 ## 数据概况
 - 分类：{category}
 - 总Badcase记录数：{reasons_data.get('total_badcases', 0)}
-- 有原因说明的记录数：{len(reasons)}
-- AI判断的Badcase原因：{len(ai_reasons)}条
-- 人工标记的Badcase原因：{len(human_reasons)}条
+- 人工评估Badcase原因数：{len(human_reasons)}条
 
-## AI判断的Badcase原因：
+## 人工评估的Badcase原因：
 """
         
-        for i, reason in enumerate(ai_reasons[:20], 1):  # 最多展示前20条
+        for i, reason in enumerate(human_reasons[:30], 1):  # 最多展示前30条，因为只有人工原因了
             prompt += f"{i}. {reason}\n"
         
-        if len(ai_reasons) > 20:
-            prompt += f"... (共{len(ai_reasons)}条，仅显示前20条)\n"
+        if len(human_reasons) > 30:
+            prompt += f"... (共{len(human_reasons)}条，仅显示前30条)\n"
         
-        prompt += "\n## 人工标记的Badcase原因：\n"
-        
-        for i, reason in enumerate(human_reasons[:20], 1):  # 最多展示前20条
-            prompt += f"{i}. {reason}\n"
-        
-        if len(human_reasons) > 20:
-            prompt += f"... (共{len(human_reasons)}条，仅显示前20条)\n"
+        if len(human_reasons) == 0:
+            prompt += "暂无人工评估的Badcase原因。\n"
         
         prompt += """
 ## 分析要求
-请从以下几个维度进行专业分析：
+请仅基于上述人工评估的Badcase原因进行专业分析，从以下几个维度：
 
-1. **主要问题类型**：归纳出3-5个主要的问题类型，按严重程度排序
-2. **问题频次分析**：统计各类问题出现的频次和占比
-3. **根本原因分析**：分析导致这些问题的根本原因
-4. **改进建议**：针对主要问题提出具体可行的改进建议
-5. **优先级建议**：按紧急程度对问题进行优先级排序
+1. **主要问题类型**：从人工评估的原因中归纳出3-5个主要的问题类型，按严重程度排序
+2. **问题频次分析**：统计各类问题在人工评估中出现的频次和占比
+3. **根本原因分析**：基于人工专家的判断分析导致这些问题的根本原因
+4. **改进建议**：针对人工识别的主要问题提出具体可行的改进建议
+5. **优先级建议**：按人工评估的严重程度对问题进行优先级排序
+
+注意：本次分析完全基于人工专家的评估和标记，确保分析结果的专业性和准确性。
 
 ## 输出格式
 请按以下JSON格式输出（不要包含任何其他内容）：
@@ -141,71 +133,6 @@ class AISummaryService:
 """
         
         return prompt
-    
-    def _call_deepseek_api(self, prompt):
-        """调用DeepSeek API"""
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            data = {
-                "model": "deepseek-chat",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是一个专业的质量分析专家，擅长分析问答系统的质量问题并提供改进建议。请严格按照要求的JSON格式输出结果。"
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "temperature": 0.3,
-                "max_tokens": 2048
-            }
-            
-            self.logger.info("正在调用DeepSeek API进行badcase原因总结...")
-            
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
-                
-                self.logger.info("DeepSeek API调用成功")
-                return {
-                    'success': True,
-                    'data': content
-                }
-            else:
-                error_msg = f"API调用失败: {response.status_code} - {response.text}"
-                self.logger.error(error_msg)
-                return {
-                    'success': False,
-                    'message': error_msg
-                }
-                
-        except requests.exceptions.Timeout:
-            error_msg = "API调用超时"
-            self.logger.error(error_msg)
-            return {
-                'success': False,
-                'message': error_msg
-            }
-        except Exception as e:
-            error_msg = f"API调用异常: {str(e)}"
-            self.logger.error(error_msg)
-            return {
-                'success': False,
-                'message': error_msg
-            }
     
     def _parse_summary_result(self, summary_text):
         """解析AI总结结果"""

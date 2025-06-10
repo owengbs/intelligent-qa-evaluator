@@ -20,12 +20,13 @@ class LLMClient:
         # 预定义不同任务使用的模型
         self.models = {
             'classification': "deepseek-v3-local-II",  # 分类任务使用 v3
-            'evaluation': "deepseek-v3-local-II",     # 评估任务使用 r1
+            'evaluation': "deepseek-v3-local-II",     # 常规评估任务使用 v3
+            'summary': "deepseek-r1-local-II",        # AI总结分析使用 r1
             'default': self.default_model
         }
         
         self.logger.info(f"LLM客户端初始化完成，默认模型: {self.default_model}")
-        self.logger.info(f"分类模型: {self.models['classification']}, 评估模型: {self.models['evaluation']}")
+        self.logger.info(f"分类模型: {self.models['classification']}, 评估模型: {self.models['evaluation']}, 总结模型: {self.models['summary']}")
     
     def dialog(self, prompt, task_type='default'):
         """
@@ -33,7 +34,7 @@ class LLMClient:
         
         Args:
             prompt: 输入的prompt内容
-            task_type: 任务类型 ('classification', 'evaluation', 'default')
+            task_type: 任务类型 ('classification', 'evaluation', 'summary', 'default')
             
         Returns:
             str: LLM的响应内容

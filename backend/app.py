@@ -673,10 +673,8 @@ def get_badcase_statistics():
 
 @app.route('/api/badcase-records', methods=['GET'])
 def get_badcase_records():
-    """获取所有badcase记录"""
+    """获取badcase记录列表"""
     try:
-        logger.info("获取badcase记录列表")
-        
         # 获取查询参数
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
@@ -691,18 +689,23 @@ def get_badcase_records():
         )
         
         return jsonify(result)
-        
     except Exception as e:
-        logger.error(f"获取badcase记录失败: {str(e)}")
-        return jsonify({'error': f'获取badcase记录失败: {str(e)}'}), 500
+        app.logger.error(f"获取badcase记录失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'获取badcase记录失败: {str(e)}'
+        }), 500
 
 @app.route('/api/badcase-reasons/<category>', methods=['GET'])
 def get_badcase_reasons_by_category(category):
     """获取指定分类下的badcase原因"""
     try:
-        logger.info(f"获取分类 {category} 的badcase原因")
+        # 获取查询参数，允许指定原因类型
+        reason_type = request.args.get('reason_type', 'human')  # 默认为人工评估
         
-        result = evaluation_history_service.get_badcase_reasons_by_category(category)
+        logger.info(f"获取分类 {category} 的badcase原因 (类型: {reason_type})")
+        
+        result = evaluation_history_service.get_badcase_reasons_by_category(category, reason_type=reason_type)
         
         return jsonify(result)
         
@@ -716,18 +719,18 @@ def generate_badcase_summary(category):
     try:
         logger.info(f"生成分类 {category} 的badcase AI总结")
         
-        # 首先获取该分类的badcase原因
-        reasons_result = evaluation_history_service.get_badcase_reasons_by_category(category)
+        # 首先获取该分类的人工评估badcase原因（用于AI总结）
+        reasons_result = evaluation_history_service.get_badcase_reasons_by_category(category, reason_type='human')
         
         if not reasons_result['success']:
             return jsonify(reasons_result), 400
         
-        # 检查是否有足够的原因进行总结
+        # 检查是否有足够的人工评估原因进行总结
         reasons_data = reasons_result['data']
         if len(reasons_data['reasons']) == 0:
             return jsonify({
                 'success': False,
-                'message': f'分类 {category} 下没有badcase原因可供总结'
+                'message': f'分类 {category} 下没有人工评估的badcase原因可供总结'
             }), 400
         
         # 导入AI总结服务
@@ -769,6 +772,20 @@ def update_dimension_weights(category):
 # ==================== 错误处理 ==================== 
 
 # ==================== 新增：标准配置管理API ==================== 
+
+@app.route('/api/categories', methods=['GET'])
+def get_categories():
+    """获取所有分类选项"""
+    try:
+        logger.info("获取分类选项")
+        
+        result = evaluation_history_service.get_categories()
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"获取分类选项失败: {str(e)}")
+        return jsonify({'error': f'获取分类选项失败: {str(e)}'}), 500
 
 @app.route('/api/standard-config', methods=['GET'])
 def get_all_category_standards():

@@ -1,8 +1,8 @@
-# DeepSeek API 配置说明
+# AI总结功能配置说明
 
 ## 📋 功能介绍
 
-AI总结功能使用DeepSeek V3大模型对各分类下的Badcase原因进行智能归纳总结，提供：
+AI总结功能使用系统内置的Venus接口调用DeepSeek V3大模型，对各分类下的Badcase原因进行智能归纳总结，提供：
 
 - 🎯 主要问题类型识别和分类
 - 📊 问题频次统计和占比分析  
@@ -10,64 +10,38 @@ AI总结功能使用DeepSeek V3大模型对各分类下的Badcase原因进行智
 - 💡 具体可行的改进建议
 - 🚨 优先级排序和严重程度评估
 
-## 🔑 API密钥配置
+## ⚙️ 系统配置
 
-### 1. 获取DeepSeek API密钥
+### 无需额外配置
 
-1. 访问 [DeepSeek开放平台](https://platform.deepseek.com/)
-2. 注册/登录账号
-3. 进入控制台，创建API密钥
-4. 复制生成的API密钥
+AI总结功能使用系统已有的Venus接口，**无需额外配置API密钥**：
 
-### 2. 配置环境变量
+- ✅ **自动使用系统配置**：使用与首页AI评估相同的Venus接口配置
+- ✅ **模型选择**：自动使用evaluation任务类型，调用适合的DeepSeek模型
+- ✅ **统一管理**：与其他AI功能使用相同的接口和配置
 
-#### 生产环境（推荐）
+### 当前使用的配置
 
-在服务器上设置环境变量：
-
-```bash
-# 临时设置（重启后失效）
-export DEEPSEEK_API_KEY="your-api-key-here"
-
-# 永久设置（添加到 ~/.bashrc 或 ~/.profile）
-echo 'export DEEPSEEK_API_KEY="your-api-key-here"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-#### 开发环境
-
-创建 `.env` 文件（如果不存在）：
+系统使用以下预配置的Venus接口：
 
 ```bash
-# 在项目根目录创建.env文件
-cd /path/to/intelligent-qa-evaluator
-echo 'DEEPSEEK_API_KEY=your-api-key-here' >> .env
+# 默认配置（已内置）
+LLM_API_BASE="http://v2.open.venus.oa.com/llmproxy"
+LLM_API_KEY="xxBZykeTGIVeqyGNaxNoMDro@2468"
+LLM_MODEL="deepseek-v3-local-II"
 ```
 
-#### Docker环境
+### 验证功能
 
-在docker-compose.yml中添加环境变量：
-
-```yaml
-version: '3.8'
-services:
-  backend:
-    # ... 其他配置
-    environment:
-      - DEEPSEEK_API_KEY=your-api-key-here
-```
-
-### 3. 验证配置
-
-重启后端服务后，查看日志确认配置：
+启动服务后，AI总结功能即可使用：
 
 ```bash
-# 重启服务
+# 启动服务
 cd backend
 python app.py
 
-# 如果配置正确，不会看到警告信息
-# 如果未配置，会看到: "DEEPSEEK_API_KEY 环境变量未设置，AI总结功能将无法使用"
+# 查看日志，应该看到：
+# "AI总结服务初始化完成，使用Venus接口"
 ```
 
 ## 🚀 使用方法
@@ -116,24 +90,21 @@ AI总结结果包含以下部分：
 
 ### 常见错误及解决方案
 
-#### 1. "DeepSeek API密钥未配置"
-**解决方案**：按照上述步骤正确设置DEEPSEEK_API_KEY环境变量
-
-#### 2. "API调用失败"
+#### 1. "AI总结失败"
 **可能原因**：
-- API密钥无效或过期
-- 网络连接问题
-- API配额不足
+- Venus接口网络连接问题
+- 系统负载过高导致超时
+- 模型服务暂时不可用
 
 **解决方案**：
-- 检查API密钥是否正确
-- 确认网络连接正常
-- 检查DeepSeek账户余额
+- 检查网络连接是否正常
+- 稍后重试
+- 检查后端日志获取详细错误信息
 
-#### 3. "总结格式解析失败"
+#### 2. "总结格式解析失败"
 **说明**：AI返回的内容格式不标准，但仍会显示原始总结内容
 
-#### 4. "没有badcase原因可供总结"
+#### 3. "没有badcase原因可供总结"
 **解决方案**：确保该分类下有Badcase记录，且记录中包含原因说明
 
 ## 📞 技术支持
@@ -141,13 +112,17 @@ AI总结结果包含以下部分：
 如遇问题，请：
 
 1. 检查后端日志获取详细错误信息
-2. 确认环境变量配置正确
-3. 验证网络连接和API密钥状态
+2. 确认Venus接口网络连接正常
+3. 验证系统负载和服务状态
 4. 联系系统管理员获取帮助
 
 ## 🔄 更新历史
 
 - **v2.1.0** (2025-06-09): 首次引入AI总结功能
+  - 使用系统内置Venus接口
   - 支持DeepSeek V3模型
   - 多维度问题分析
-  - 智能改进建议生成 
+  - 智能改进建议生成
+- **v2.1.1** (2025-06-09): 优化接口配置
+  - 改用Venus接口，无需额外配置
+  - 与系统其他AI功能统一管理 

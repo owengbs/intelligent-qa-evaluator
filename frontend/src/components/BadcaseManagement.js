@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Card,
   Row,
@@ -10,7 +11,6 @@ import {
   Space,
   Typography,
   Empty,
-  Spin,
   Tooltip,
   Modal,
   Statistic,
@@ -41,6 +41,7 @@ const api = axios.create({
 });
 
 const BadcaseManagement = () => {
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [badcaseData, setBadcaseData] = useState([]);
   const [statistics, setStatistics] = useState(null);
@@ -56,11 +57,55 @@ const BadcaseManagement = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
 
-  // 分类选项 - 基于数据库实际分类
-const categoryOptions = [
-  '个股决策', '个股分析', '事实检索', '客服咨询', '大盘行业分析', 
-  '宏观经济分析', '开户咨询', '知识咨询', '选股'
-];
+  // 动态分类选项
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  
+  // 用于存储当前的AbortController和防抖timeout
+  const abortControllerRef = useRef(null);
+  const debounceTimeoutRef = useRef(null);
+
+  // 组件卸载时清理资源
+  useEffect(() => {
+    return () => {
+      // 取消所有进行中的请求
+      abortControllerRef.current?.abort();
+      // 清理防抖timeout
+      clearTimeout(debounceTimeoutRef.current);
+    };
+  }, []);
+
+  // 处理URL参数 - 使用防抖机制解决竞态条件
+  useEffect(() => {
+    const categoryFromUrl = searchParams.get('category');
+    const badcaseTypeFromUrl = searchParams.get('badcase_type');
+    
+    // 清理之前的防抖timeout
+    clearTimeout(debounceTimeoutRef.current);
+    
+    // 使用setTimeout进行防抖，确保所有参数更新完成后再执行
+    debounceTimeoutRef.current = setTimeout(() => {
+      setFilters(prev => {
+        const newFilters = { ...prev };
+        let hasChanges = false;
+        
+        // 处理分类参数
+        if (categoryFromUrl && categoryFromUrl !== prev.classification_level2) {
+          newFilters.classification_level2 = categoryFromUrl;
+          hasChanges = true;
+        }
+        
+        // 处理badcase类型参数
+        if (badcaseTypeFromUrl && badcaseTypeFromUrl !== prev.badcase_type) {
+          newFilters.badcase_type = badcaseTypeFromUrl;
+          hasChanges = true;
+        }
+        
+        return hasChanges ? newFilters : prev;
+      });
+    }, 50); // 50ms防抖延迟，确保URL参数解析完成
+    
+    // 清理函数已移至组件卸载清理中
+  }, [searchParams]);
 
   // 获取badcase记录
   const fetchBadcaseRecords = useCallback(async (page = 1, pageSize = 20) => {
@@ -74,7 +119,19 @@ const categoryOptions = [
         classification_level2: filters.classification_level2
       };
 
-      const response = await api.get('/badcase-records', { params });
+      // 创建新的AbortController
+      const newAbortController = new AbortController();
+      
+      // 取消旧请求
+      abortControllerRef.current?.abort();
+      
+      // 存储新的AbortController
+      abortControllerRef.current = newAbortController;
+      
+      const response = await api.get('/badcase-records', { 
+        params,
+        signal: newAbortController.signal 
+      });
       
       if (response.data.success) {
         setBadcaseData(response.data.data.items);
@@ -87,6 +144,14 @@ const categoryOptions = [
         message.error('获取Badcase记录失败');
       }
     } catch (error) {
+      // 更精确地处理被取消的请求错误
+      if (error.code === 'ERR_CANCELED' || error.name === 'AbortError' || error.message?.includes('canceled')) {
+        // 请求被取消，不显示错误消息
+        console.log('API请求被取消 - 这是正常的');
+        return;
+      }
+      
+      // 只有真正的错误才显示错误消息
       console.error('获取Badcase记录失败:', error);
       message.error('获取Badcase记录失败');
     } finally {
@@ -107,11 +172,29 @@ const categoryOptions = [
     }
   }, []);
 
-  // 初始化数据
+  // 获取分类选项
+  const fetchCategories = useCallback(async () => {
+    try {
+      const response = await api.get('/categories');
+      
+      if (response.data.success && response.data.data.categories) {
+        setCategoryOptions(response.data.data.categories);
+      }
+    } catch (error) {
+      console.error('获取分类选项失败:', error);
+      // 如果API失败，使用默认分类
+      setCategoryOptions([
+        '个股决策', '个股分析', '事实检索', '客服咨询', '大盘行业分析', 
+        '宏观经济分析', '知识咨询', '选股'
+      ]);
+    }
+  }, []);
+
+  // 初始化数据（仅获取统计和分类数据，不获取记录）
   useEffect(() => {
-    fetchBadcaseRecords();
     fetchStatistics();
-  }, [fetchBadcaseRecords, fetchStatistics]);
+    fetchCategories();
+  }, [fetchStatistics, fetchCategories]);
 
   // 当筛选条件改变时重新获取数据
   useEffect(() => {

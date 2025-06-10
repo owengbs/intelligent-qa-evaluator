@@ -133,6 +133,29 @@ const DimensionStatistics = () => {
     });
   };
 
+  // 跳转到badcase管理页面
+  const handleNavigateToBadcase = (category = null, badcaseType = null) => {
+    // 构建跳转URL到外部badcase页面
+    const baseUrl = 'http://9.135.87.101:8701/badcase';
+    const params = new URLSearchParams();
+    
+    // 如果指定了badcase类型，设置筛选条件
+    if (badcaseType) {
+      params.append('badcase_type', badcaseType);
+    }
+    
+    // 如果指定了分类，设置分类筛选条件
+    if (category) {
+      params.append('category', category);
+    }
+    
+    // 构建完整URL
+    const targetUrl = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
+    
+    // 使用window.open在新标签页打开
+    window.open(targetUrl, '_blank');
+  };
+
   // 获取百分比对应的颜色
   const getPercentageColor = (percentage) => {
     if (percentage >= 80) return '#52c41a';
@@ -1488,13 +1511,26 @@ const DimensionStatistics = () => {
             </Card>
           </Col>
           <Col xs={24} sm={6}>
-            <Card style={{ textAlign: 'center', borderRadius: '12px' }}>
+            <Card 
+              style={{ 
+                textAlign: 'center', 
+                borderRadius: '12px',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                border: '1px solid #d9d9d9'
+              }}
+              hoverable
+              onClick={() => handleNavigateToBadcase()}
+            >
               <Statistic
                 title="Badcase总数"
                 value={overall.total_badcases}
                 valueStyle={{ color: '#ff4d4f' }}
                 prefix="🚨"
               />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                点击查看详情
+              </Text>
             </Card>
           </Col>
           <Col xs={24} sm={6}>
@@ -1587,7 +1623,19 @@ const DimensionStatistics = () => {
                         </Text>
                       </div>
                       <div>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
+                        <Text 
+                          type="secondary" 
+                          style={{ 
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            color: '#1890ff'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleNavigateToBadcase(category, 'human');
+                          }}
+                        >
                           {stats.badcase_count}/{stats.total_records} 条
                         </Text>
                       </div>
@@ -1608,7 +1656,7 @@ const DimensionStatistics = () => {
                             borderRadius: '6px'
                           }}
                         >
-                          AI总结
+                          智能分析
                         </Button>
                       </div>
                     </div>
@@ -1913,7 +1961,7 @@ const DimensionStatistics = () => {
         <div style={{ textAlign: 'center', padding: '40px 20px' }}>
           <Spin size="large" />
           <div style={{ marginTop: 16 }}>
-            <Text>AI正在分析Badcase原因，请稍候...</Text>
+                            <Text>AI正在进行智能分析，请稍候...</Text>
           </div>
         </div>
       );
@@ -1950,10 +1998,17 @@ const DimensionStatistics = () => {
       <div>
         {/* 概览信息 */}
         <div style={{ marginBottom: 24, padding: '16px', background: '#f6f9fc', borderRadius: '8px' }}>
+          <Alert
+            message="分析说明"
+            description="此分析基于人工评估标记的Badcase原因，通过AI进行智能总结和归纳"
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
           <Row gutter={16}>
             <Col span={12}>
               <Statistic
-                title="分析的原因总数"
+                title="人工评估原因总数"
                 value={total_reasons}
                 prefix={<BulbOutlined />}
                 valueStyle={{ color: '#1890ff' }}
@@ -2099,7 +2154,7 @@ const DimensionStatistics = () => {
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <RobotOutlined style={{ color: '#667eea' }} />
-            <span>AI Badcase原因总结 - {summaryModal.category}</span>
+            <span>Badcase智能分析 - {summaryModal.category}</span>
           </div>
         }
         open={summaryModal.visible}
