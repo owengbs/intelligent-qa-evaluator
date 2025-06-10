@@ -125,6 +125,10 @@ const EvaluationForm = () => {
   // 图片历史记录状态
   const [uploadedImages, setUploadedImages] = useState([]);
   
+  // AI助手相关状态
+  const [aiAssistantLoading, setAiAssistantLoading] = useState(false);
+  const [pageBlocked, setPageBlocked] = useState(false);
+  
   // Redux状态
   const { isLoading, result, error, history } = useSelector((state) => state.evaluation);
 
@@ -634,6 +638,56 @@ ${dimensionRequirements}
     setClassification(null);
     clearImage(); // 清理图片状态
     setUploadedImages([]); // 清理图片历史记录
+  };
+
+  // AI助手处理函数
+  const handleAskAI = async () => {
+    try {
+      setAiAssistantLoading(true);
+      setPageBlocked(true);
+      
+      // 获取当前用户输入的问题
+      const userQuery = form.getFieldValue('userQuery');
+      if (!userQuery || !userQuery.trim()) {
+        message.warning('请先输入问题，然后再询问AI');
+        return;
+      }
+      
+      // 调用AI助手API
+      const response = await api.post('/ai-assistant', {
+        question: userQuery.trim(),
+        context: {
+          evaluationCriteria: form.getFieldValue('evaluationCriteria') || '',
+          referenceAnswer: form.getFieldValue('referenceAnswer') || ''
+        }
+      });
+      
+      if (response.data.success && response.data.data) {
+        const aiResponse = response.data.data.answer;
+        if (aiResponse) {
+          // 将AI的回答填入模型回答框
+          form.setFieldsValue({
+            modelResponse: aiResponse
+          });
+          message.success('🤖 AI已生成回答并填入回答框！');
+        } else {
+          message.error('AI返回的回答为空');
+        }
+      } else {
+        message.error(response.data.message || 'AI助手调用失败');
+      }
+      
+    } catch (error) {
+      console.error('AI助手调用失败:', error);
+      if (error.response && error.response.data && error.response.data.message) {
+        message.error(`AI助手调用失败: ${error.response.data.message}`);
+      } else {
+        message.error('AI助手调用失败，请检查网络连接或稍后重试');
+      }
+    } finally {
+      setAiAssistantLoading(false);
+      setPageBlocked(false);
+    }
   };
 
   // 人工评估维度组件
@@ -2124,6 +2178,31 @@ ${dimensionRequirements}
                       }}
                     />
                   </Form.Item>
+                  
+                  {/* AI助手按钮 */}
+                  <div style={{ marginTop: '-12px', marginBottom: '24px' }}>
+                    <Button
+                      type="primary"
+                      icon={<RobotOutlined />}
+                      loading={aiAssistantLoading}
+                      disabled={pageBlocked}
+                      onClick={handleAskAI}
+                      style={{
+                        borderRadius: '8px',
+                        background: 'linear-gradient(135deg, #52c41a 0%, #1890ff 100%)',
+                        border: 'none',
+                        boxShadow: '0 4px 12px rgba(82, 196, 26, 0.3)',
+                        height: '40px',
+                        fontSize: '16px',
+                        fontWeight: 600
+                      }}
+                    >
+                      {aiAssistantLoading ? '🤖 AI正在思考...' : '🤖 问AI'}
+                    </Button>
+                    <div style={{ marginTop: '4px', fontSize: '12px', color: '#666' }}>
+                      输入问题后点击此按钮，AI将自动生成回答并填入右侧回答框
+                    </div>
+                  </div>
                 </Col>
                 <Col xs={24} lg={12}>
                   <Form.Item 

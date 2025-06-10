@@ -20,6 +20,7 @@ from services.evaluation_service import EvaluationService
 from services.classification_service_sqlite import ClassificationService
 from services.evaluation_standard_service import EvaluationStandardService
 from services.evaluation_history_service import EvaluationHistoryService
+from services.ai_assistant import ai_assistant
 from utils.logger import get_logger
 
 # 导入路由蓝图
@@ -770,6 +771,48 @@ def update_dimension_weights(category):
         return jsonify({'error': str(e)}), 500
 
 # ==================== 错误处理 ==================== 
+
+# ==================== AI助手API ==================== 
+
+@app.route('/api/ai-assistant/ask', methods=['POST'])
+def ask_ai_assistant():
+    """询问AI助手"""
+    try:
+        logger.info("收到AI助手请求")
+        
+        data = request.get_json()
+        
+        # 验证必需字段
+        if 'question' not in data:
+            return jsonify({'error': '缺少必需字段: question'}), 400
+        
+        question = data['question'].strip()
+        if not question:
+            return jsonify({'error': '问题不能为空'}), 400
+        
+        logger.info(f"AI助手问题: {question[:100]}...")
+        
+        # 调用AI助手服务
+        result = ai_assistant.ask_ai(question)
+        
+        if result['success']:
+            logger.info("✅ AI助手回答成功")
+            return jsonify({
+                'success': True,
+                'answer': result['answer'],
+                'message': result['message']
+            })
+        else:
+            logger.error(f"❌ AI助手回答失败: {result['message']}")
+            return jsonify({
+                'success': False,
+                'error': result['message']
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"AI助手服务异常: {e}")
+        traceback.print_exc()
+        return jsonify({'error': f'AI助手服务异常: {str(e)}'}), 500
 
 # ==================== 新增：标准配置管理API ==================== 
 

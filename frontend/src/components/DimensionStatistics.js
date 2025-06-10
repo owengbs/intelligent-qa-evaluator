@@ -463,38 +463,28 @@ const DimensionStatistics = () => {
       );
     }
 
-    // 计算整体统计
-    const totalEvaluations = summary.ai_total_evaluations + summary.human_total_evaluations;
+    // 计算整体统计 - 修正总评估次数，避免重复计算
+    // 使用历史记录数而不是AI+人工评估数的总和
+    const totalEvaluations = summary.total_history_records || summary.human_total_evaluations || 0;
     
-    // 合并所有维度数据用于计算整体性能
-    const allDimensions = [];
-    
-    // 添加AI评估维度
-    Object.entries(aiData).forEach(([category, categoryData]) => {
-      if (categoryData.dimensions) {
-        Object.entries(categoryData.dimensions).forEach(([key, data]) => {
-          allDimensions.push({ key, ...data, category, source: 'AI' });
-        });
-      }
-    });
-    
-    // 添加人工评估维度
+    // 只基于人工评估数据计算平均表现
+    const humanDimensions = [];
     Object.entries(humanData).forEach(([category, categoryData]) => {
       if (categoryData.dimensions) {
         Object.entries(categoryData.dimensions).forEach(([key, data]) => {
-          allDimensions.push({ key, ...data, category, source: '人工' });
+          humanDimensions.push({ key, ...data, category, source: '人工' });
         });
       }
     });
 
-    const avgPerformance = allDimensions.length > 0 ? 
-      (allDimensions.reduce((sum, d) => sum + (d.avg_percentage || 0), 0) / allDimensions.length).toFixed(1) : 0;
+    const avgPerformance = humanDimensions.length > 0 ? 
+      (humanDimensions.reduce((sum, d) => sum + (d.avg_percentage || 0), 0) / humanDimensions.length).toFixed(1) : 0;
 
     return (
       <div style={{ padding: '0 8px' }}>
         {/* 总体统计概览 */}
         <Row gutter={[24, 24]} style={{ marginBottom: 32 }}>
-          <Col xs={24} sm={12} md={6}>
+          <Col xs={24} sm={12} md={12}>
             <Card 
               style={{ 
                 textAlign: 'center', 
@@ -506,55 +496,17 @@ const DimensionStatistics = () => {
               bodyStyle={{ padding: '24px 20px' }}
             >
               <Statistic
-                title={<Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>总评估次数</Text>}
+                title={<Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: '16px' }}>总评估次数</Text>}
                 value={totalEvaluations}
-                prefix={<BarChartOutlined style={{ color: 'white', fontSize: '20px' }} />}
-                valueStyle={{ color: 'white', fontSize: '28px', fontWeight: 'bold' }}
+                prefix={<BarChartOutlined style={{ color: 'white', fontSize: '24px' }} />}
+                valueStyle={{ color: 'white', fontSize: '32px', fontWeight: 'bold' }}
               />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card 
-              style={{ 
-                textAlign: 'center', 
-                borderRadius: '16px',
-                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                border: 'none',
-                color: 'white'
-              }}
-              bodyStyle={{ padding: '24px 20px' }}
-            >
-              <Statistic
-                title={<Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>分类数量</Text>}
-                value={summary.ai_categories + summary.human_categories}
-                prefix={<PieChartOutlined style={{ color: 'white', fontSize: '20px' }} />}
-                valueStyle={{ color: 'white', fontSize: '28px', fontWeight: 'bold' }}
-              />
-              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: '12px' }}>
-                AI: {summary.ai_categories} | 人工: {summary.human_categories}
+              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', marginTop: '8px' }}>
+                历史记录总数
               </Text>
             </Card>
           </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card 
-              style={{ 
-                textAlign: 'center', 
-                borderRadius: '16px',
-                background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-                border: 'none',
-                color: 'white'
-              }}
-              bodyStyle={{ padding: '24px 20px' }}
-            >
-              <Statistic
-                title={<Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>维度总数</Text>}
-                value={allDimensions.length}
-                prefix={<LineChartOutlined style={{ color: 'white', fontSize: '20px' }} />}
-                valueStyle={{ color: 'white', fontSize: '28px', fontWeight: 'bold' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
+          <Col xs={24} sm={12} md={12}>
             <Card 
               style={{ 
                 textAlign: 'center', 
@@ -566,12 +518,15 @@ const DimensionStatistics = () => {
               bodyStyle={{ padding: '24px 20px' }}
             >
               <Statistic
-                title={<Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>平均表现</Text>}
+                title={<Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: '16px' }}>平均表现（人工评分）</Text>}
                 value={avgPerformance}
                 suffix="%"
-                prefix={<TrophyOutlined style={{ color: 'white', fontSize: '20px' }} />}
-                valueStyle={{ color: 'white', fontSize: '28px', fontWeight: 'bold' }}
+                prefix={<TrophyOutlined style={{ color: 'white', fontSize: '24px' }} />}
+                valueStyle={{ color: 'white', fontSize: '32px', fontWeight: 'bold' }}
               />
+              <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', marginTop: '8px' }}>
+                基于人工评估数据
+              </Text>
             </Card>
           </Col>
         </Row>
@@ -713,258 +668,9 @@ const DimensionStatistics = () => {
           </Col>
         </Row>
 
-        {/* 各维度整体表现 */}
-        <Card 
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '20px' }}>🎯</span>
-              <Text strong style={{ fontSize: '18px', color: '#1890ff' }}>
-                各维度整体表现 (AI + 人工)
-              </Text>
-            </div>
-          }
-          style={{ 
-            marginBottom: 32, 
-            borderRadius: '16px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.1)'
-          }}
-          bodyStyle={{ padding: '32px 24px' }}
-        >
-          <Row gutter={[24, 24]}>
-            {/* 按维度分组统计 */}
-            {Object.entries(
-              allDimensions.reduce((acc, dim) => {
-                if (!acc[dim.dimension_name]) {
-                  acc[dim.dimension_name] = {
-                    name: dim.dimension_name,
-                    totalEvals: 0,
-                    totalScore: 0,
-                    totalMaxScore: 0,
-                    evaluations: []
-                  };
-                }
-                acc[dim.dimension_name].totalEvals += dim.total_evaluations;
-                acc[dim.dimension_name].totalScore += dim.avg_score * dim.total_evaluations;
-                acc[dim.dimension_name].totalMaxScore += dim.max_possible_score * dim.total_evaluations;
-                acc[dim.dimension_name].evaluations.push(dim);
-                return acc;
-              }, {})
-            ).map(([dimName, dimData]) => {
-              const avgPercentage = dimData.totalMaxScore > 0 ? 
-                ((dimData.totalScore / dimData.totalMaxScore) * 100) : 0;
-              
-              return (
-                <Col xs={24} sm={12} md={8} lg={6} key={dimName}>
-                  <Card
-                    style={{
-                      background: 'linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%)',
-                      border: '2px solid #e8f4fd',
-                      borderRadius: '16px',
-                      height: '260px',
-                      transition: 'all 0.3s ease',
-                      cursor: 'pointer'
-                    }}
-                    hoverable
-                    bodyStyle={{ padding: '24px 20px', height: '100%' }}
-                  >
-                    <div style={{ 
-                      textAlign: 'center', 
-                      height: '100%', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      justifyContent: 'space-between',
-                      minHeight: '220px'
-                    }}>
-                      <div style={{ flex: '0 0 auto' }}>
-                                              <div style={{ fontSize: '32px', marginBottom: '10px' }}>
-                        {getDimensionIcon(dimName)}
-                      </div>
-                        <Title level={5} style={{ 
-                          margin: '0 0 8px 0', 
-                          color: '#1890ff', 
-                          fontSize: '16px',
-                          fontWeight: 'bold'
-                        }}>
-                          {dimName}
-                        </Title>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          {dimData.totalEvals} 次评估
-                        </Text>
-                        <div style={{ marginTop: '4px' }}>
-                          {dimData.evaluations.map((evaluation, idx) => (
-                            <Text key={idx} style={{ 
-                              fontSize: '10px', 
-                              marginRight: '4px',
-                              padding: '2px 6px',
-                              borderRadius: '8px',
-                              background: evaluation.source === 'AI' ? '#f0f2ff' : '#f6ffed',
-                              color: evaluation.source === 'AI' ? '#722ed1' : '#1890ff'
-                            }}>
-                              {evaluation.source}
-                            </Text>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '16px 0' }}>
-                        <Progress
-                          type="circle"
-                          percent={Math.round(avgPercentage)}
-                          size={80}
-                          strokeColor={getPercentageColor(avgPercentage)}
-                          strokeWidth={8}
-                          format={percent => (
-                            <span style={{ 
-                              fontSize: '16px', 
-                              fontWeight: 'bold',
-                              color: getPercentageColor(avgPercentage)
-                            }}>
-                              {percent}%
-                            </span>
-                          )}
-                        />
-                      </div>
-                      
-                      <div style={{ flex: '0 0 auto', paddingTop: '8px' }}>
-                        <Tag 
-                          color={getPercentageLevel(avgPercentage).color} 
-                          style={{ 
-                            fontSize: '12px',
-                            fontWeight: 'bold',
-                            padding: '6px 16px',
-                            borderRadius: '12px',
-                            border: 'none',
-                            height: '28px',
-                            lineHeight: '16px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          {getPercentageLevel(avgPercentage).text}
-                        </Tag>
-                      </div>
-                    </div>
-                  </Card>
-                </Col>
-              );
-            })}
-          </Row>
-        </Card>
 
-        {/* 分类表现对比 */}
-        <Card 
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '20px' }}>📈</span>
-              <Text strong style={{ fontSize: '18px', color: '#1890ff' }}>
-                分类表现对比
-              </Text>
-            </div>
-          }
-          style={{ 
-            borderRadius: '16px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.1)'
-          }}
-          bodyStyle={{ padding: '32px 24px' }}
-        >
-          <Row gutter={[24, 24]}>
-            {/* 合并AI和人工评估的分类 */}
-            {[...new Set([...Object.keys(aiData), ...Object.keys(humanData)])].map(category => {
-              const aiCategoryData = aiData[category];
-              const humanCategoryData = humanData[category];
-              
-              // 合并维度数据
-              const allDimensionsForCategory = [];
-              
-              if (aiCategoryData?.dimensions) {
-                Object.entries(aiCategoryData.dimensions).forEach(([key, data]) => {
-                  allDimensionsForCategory.push({...data, source: 'AI'});
-                });
-              }
-              
-              if (humanCategoryData?.dimensions) {
-                Object.entries(humanCategoryData.dimensions).forEach(([key, data]) => {
-                  allDimensionsForCategory.push({...data, source: '人工'});
-                });
-              }
-              
-              const totalEvaluations = (aiCategoryData?.total_evaluations || 0) + (humanCategoryData?.total_evaluations || 0);
-              const avgPerformance = allDimensionsForCategory.length > 0 ? 
-                (allDimensionsForCategory.reduce((sum, d) => sum + d.avg_percentage, 0) / allDimensionsForCategory.length).toFixed(1) : 0;
 
-              return (
-                <Col xs={24} sm={12} md={8} key={category}>
-                  <Card
-                    style={{
-                      background: 'linear-gradient(135deg, #fff9f0 0%, #ffffff 100%)',
-                      border: '2px solid #ffe7ba',
-                      borderRadius: '16px',
-                      height: '180px'
-                    }}
-                    bodyStyle={{ padding: '20px' }}
-                  >
-                    <div style={{ textAlign: 'center' }}>
-                      <Title level={5} style={{ 
-                        margin: '0 0 12px 0', 
-                        color: '#fa8c16',
-                        fontSize: '16px'
-                      }}>
-                        {category}
-                      </Title>
-                      
-                      <div style={{ margin: '16px 0' }}>
-                        <Statistic
-                          value={avgPerformance}
-                          suffix="%"
-                          valueStyle={{ 
-                            color: getPercentageColor(parseFloat(avgPerformance)),
-                            fontSize: '24px',
-                            fontWeight: 'bold'
-                          }}
-                        />
-                      </div>
-                      
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px' }}>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          {totalEvaluations} 次评估
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          {allDimensionsForCategory.length} 个维度
-                        </Text>
-                      </div>
-                      
-                      <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                        {aiCategoryData && (
-                          <Text style={{ 
-                            fontSize: '10px',
-                            padding: '2px 6px',
-                            borderRadius: '8px',
-                            background: '#f0f2ff',
-                            color: '#722ed1'
-                          }}>
-                            AI
-                          </Text>
-                        )}
-                        {humanCategoryData && (
-                          <Text style={{ 
-                            fontSize: '10px',
-                            padding: '2px 6px',
-                            borderRadius: '8px',
-                            background: '#f6ffed',
-                            color: '#1890ff'
-                          }}>
-                            人工
-                          </Text>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                </Col>
-              );
-            })}
-          </Row>
-        </Card>
+
       </div>
     );
   };
