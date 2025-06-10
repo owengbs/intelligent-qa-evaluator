@@ -717,33 +717,78 @@ def get_badcase_reasons_by_category(category):
 @app.route('/api/badcase-summary/<category>', methods=['POST'])
 def generate_badcase_summary(category):
     """生成指定分类的badcase AI总结"""
+    import time
+    request_start_time = time.time()
+    
     try:
-        logger.info(f"生成分类 {category} 的badcase AI总结")
+        logger.info(f"🎯 [智能分析请求] 开始处理badcase AI总结")
+        logger.info(f"   - 请求分类: {category}")
+        logger.info(f"   - 请求时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   - 客户端IP: {request.remote_addr}")
         
         # 首先获取该分类的人工评估badcase原因（用于AI总结）
+        logger.info(f"📋 第一步: 获取分类 {category} 的人工评估badcase原因")
         reasons_result = evaluation_history_service.get_badcase_reasons_by_category(category, reason_type='human')
         
         if not reasons_result['success']:
+            logger.warning(f"⚠️  获取badcase原因失败: {reasons_result.get('message', '未知错误')}")
             return jsonify(reasons_result), 400
         
         # 检查是否有足够的人工评估原因进行总结
         reasons_data = reasons_result['data']
+        logger.info(f"📊 获取到的原因数据:")
+        logger.info(f"   - 总badcase记录数: {reasons_data.get('total_badcases', 0)}")
+        logger.info(f"   - 人工评估原因数: {len(reasons_data.get('reasons', []))}")
+        
         if len(reasons_data['reasons']) == 0:
+            logger.warning(f"⚠️  分类 {category} 下没有人工评估的badcase原因可供总结")
             return jsonify({
                 'success': False,
                 'message': f'分类 {category} 下没有人工评估的badcase原因可供总结'
             }), 400
         
+        # 显示原因详情
+        logger.info(f"📝 人工评估原因详情:")
+        for i, reason in enumerate(reasons_data['reasons'][:5], 1):  # 只显示前5条
+            logger.info(f"   {i}. [记录#{reason.get('record_id', '未知')}] {reason.get('reason', '无原因')[:100]}...")
+        
+        if len(reasons_data['reasons']) > 5:
+            logger.info(f"   ... 还有 {len(reasons_data['reasons']) - 5} 条原因")
+        
         # 导入AI总结服务
+        logger.info(f"🤖 第二步: 启动AI总结服务")
         from services.ai_summary_service import ai_summary_service
         
         # 调用AI总结服务
+        logger.info(f"🚀 第三步: 开始调用AI总结分析...")
         summary_result = ai_summary_service.summarize_badcase_reasons(category, reasons_data)
+        
+        # 计算处理时间
+        request_end_time = time.time()
+        processing_time = request_end_time - request_start_time
+        
+        if summary_result.get('success'):
+            logger.info(f"✅ [智能分析完成] badcase AI总结生成成功")
+            logger.info(f"   - 处理时长: {processing_time:.2f}秒")
+            logger.info(f"   - 分析分类: {category}")
+            logger.info(f"   - 总结状态: 成功")
+        else:
+            logger.error(f"❌ [智能分析失败] badcase AI总结生成失败")
+            logger.error(f"   - 处理时长: {processing_time:.2f}秒")
+            logger.error(f"   - 失败原因: {summary_result.get('message', '未知错误')}")
         
         return jsonify(summary_result)
         
     except Exception as e:
-        logger.error(f"生成badcase总结失败: {str(e)}")
+        request_end_time = time.time()
+        processing_time = request_end_time - request_start_time
+        
+        logger.error(f"💥 [智能分析异常] badcase总结过程发生异常:")
+        logger.error(f"   - 异常类型: {type(e).__name__}")
+        logger.error(f"   - 异常信息: {str(e)}")
+        logger.error(f"   - 处理时长: {processing_time:.2f}秒")
+        logger.error(f"   - 请求分类: {category}")
+        
         return jsonify({'error': f'生成badcase总结失败: {str(e)}'}), 500
 
 @app.route('/api/evaluation-standards/<category>/weights', methods=['PUT'])

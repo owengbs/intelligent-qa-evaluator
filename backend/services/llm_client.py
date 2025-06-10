@@ -15,7 +15,7 @@ class LLMClient:
         self.default_model = os.getenv('LLM_MODEL', "deepseek-v3-local-II")
         self.max_tokens = int(os.getenv('LLM_MAX_TOKENS', '10000'))
         self.temperature = float(os.getenv('LLM_TEMPERATURE', '0.1'))
-        self.timeout = int(os.getenv('LLM_TIMEOUT', '100'))
+        self.timeout = int(os.getenv('LLM_TIMEOUT', '300'))  # 增加到5分钟超时，确保AI总结等复杂任务不会超时
         
         # 预定义不同任务使用的模型
         self.models = {

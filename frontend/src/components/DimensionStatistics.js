@@ -37,7 +37,7 @@ const { Title, Text } = Typography;
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 180000, // 增加到3分钟超时，适应大模型长时间处理
   headers: {
     'Content-Type': 'application/json',
   },
@@ -101,7 +101,9 @@ const DimensionStatistics = () => {
         data: null
       });
 
-      const response = await api.post(`/badcase-summary/${encodeURIComponent(category)}`);
+      const response = await api.post(`/badcase-summary/${encodeURIComponent(category)}`, {}, {
+        timeout: 300000 // 5分钟超时，专门针对AI总结这类复杂任务
+      });
       
       if (response.data.success) {
         setSummaryModal(prev => ({

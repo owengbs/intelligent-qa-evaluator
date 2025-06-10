@@ -50,7 +50,7 @@ class AIAssistant:
                 headers=self.headers, 
                 params=self.params, 
                 data=json.dumps(data),
-                timeout=60  # 60秒超时
+                timeout=180  # 增加到3分钟超时，适应大模型长时间处理
             )
             
             if response.status_code == 200:

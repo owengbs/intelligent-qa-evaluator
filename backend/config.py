@@ -62,7 +62,7 @@ class Config:
     
     # LLM配置
     LLM_MODEL = 'deepseek-v3-local-II'
-    LLM_TIMEOUT = 120
+    LLM_TIMEOUT = 300  # 增加到5分钟超时，确保AI总结等复杂任务不会超时
     
     # 安全配置
     SECRET_KEY = 'your-secret-key-here'

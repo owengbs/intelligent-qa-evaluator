@@ -37,14 +37,49 @@ class AISummaryService:
             # 构建prompt - 仅基于人工评估的原因
             prompt = self._build_summary_prompt(category, reasons_data)
             
+            # 打印完整的prompt用于调试
+            self.logger.info(f"🤖 开始AI总结分析 - 分类: {category}")
+            self.logger.info(f"📝 发送给大模型的完整Prompt:")
+            self.logger.info("=" * 80)
+            self.logger.info(prompt)
+            self.logger.info("=" * 80)
+            self.logger.info(f"📏 Prompt长度: {len(prompt)}字符")
+            
             # 调用Venus接口，使用summary任务类型（会自动选择deepseek-r1-local-II模型）
-            summary_text = self.llm_client.dialog(prompt, task_type='summary')
+            # 为AI总结任务使用更长的超时时间
+            original_timeout = self.llm_client.timeout
+            self.llm_client.timeout = 300  # 5分钟超时，适应复杂分析任务
+            
+            self.logger.info(f"⏱️  设置超时时间: {self.llm_client.timeout}秒")
+            self.logger.info(f"🚀 开始调用大模型API...")
+            
+            try:
+                summary_text = self.llm_client.dialog(prompt, task_type='summary')
+                self.logger.info(f"✅ 大模型响应成功，响应长度: {len(summary_text)}字符")
+                self.logger.info(f"📄 大模型原始响应:")
+                self.logger.info("-" * 60)
+                self.logger.info(summary_text)
+                self.logger.info("-" * 60)
+            finally:
+                # 恢复原始超时时间
+                self.llm_client.timeout = original_timeout
             
             # 解析总结结果
+            self.logger.info(f"🔧 开始解析AI总结结果...")
             parsed_summary = self._parse_summary_result(summary_text)
             
             # 计算实际使用的人工评估原因数
             human_reasons_count = len([r for r in reasons_data['reasons'] if r['type'] == 'human'])
+            
+            self.logger.info(f"📊 解析完成:")
+            self.logger.info(f"   - 分类: {category}")
+            self.logger.info(f"   - 人工评估原因数: {human_reasons_count}条")
+            self.logger.info(f"   - 解析状态: {'成功' if not parsed_summary.get('parse_error') else '失败'}")
+            
+            if parsed_summary.get('parse_error'):
+                self.logger.warning(f"⚠️  JSON解析失败，将返回原始文本")
+            else:
+                self.logger.info(f"✅ JSON解析成功，提取到 {len(parsed_summary.get('main_issues', []))} 个主要问题")
             
             return {
                 'success': True,
@@ -57,7 +92,20 @@ class AISummaryService:
             }
                 
         except Exception as e:
-            self.logger.error(f"AI总结失败: {str(e)}")
+            self.logger.error(f"❌ AI总结过程发生异常:")
+            self.logger.error(f"   - 异常类型: {type(e).__name__}")
+            self.logger.error(f"   - 异常信息: {str(e)}")
+            self.logger.error(f"   - 分类: {category}")
+            self.logger.error(f"   - 输入原因数: {len(reasons_data.get('reasons', []))}")
+            
+            # 如果是超时异常，提供更具体的信息
+            if 'timeout' in str(e).lower() or 'Timeout' in str(e):
+                self.logger.error(f"⏰ 检测到超时异常，当前配置的超时时间: {getattr(self.llm_client, 'timeout', '未知')}秒")
+                return {
+                    'success': False,
+                    'message': f'AI总结请求超时，大模型处理时间过长。当前超时设置: {getattr(self.llm_client, "timeout", "未知")}秒'
+                }
+            
             return {
                 'success': False,
                 'message': f'AI总结失败: {str(e)}'

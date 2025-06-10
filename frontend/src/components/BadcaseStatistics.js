@@ -27,7 +27,7 @@ const { Title, Text } = Typography;
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 180000, // 增加到3分钟超时，适应大模型长时间处理
   headers: {
     'Content-Type': 'application/json',
   },
